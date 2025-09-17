@@ -1,0 +1,32 @@
+# Rust
+/target/
+Cargo.lock
+**/*.rs.bk
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Test directories (for development)
+test_*/
+large_test*/
+ttttt/
+
+# Logs
+*.log
+
+# Local configuration
+.env
