@@ -144,38 +144,59 @@ pub fn truncate_path(path: &str, max_width: usize) -> String {
     format!("{}...{}", &path[..start_len], &path[path.len() - end_len..])
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::io::Write;
+
+static LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
+static LOG_FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
+
+pub fn init_logging(verbose: bool) {
+    LOGGING_ENABLED.store(verbose, Ordering::Relaxed);
+
+    if verbose {
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open("tudiff.log")
+        {
+            *LOG_FILE.lock().unwrap() = Some(file);
+            log_info("Logging initialized");
+        }
+    }
+}
+
 pub fn log_error(message: &str) {
-    use std::io::Write;
-
-    let log_message = format!(
-        "[ERROR] {}: {}\n",
-        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-        message
-    );
-
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("tudiff_main_error.log")
-    {
-        let _ = file.write_all(log_message.as_bytes());
+    if LOGGING_ENABLED.load(Ordering::Relaxed) {
+        log_with_level("ERROR", message);
     }
 }
 
 pub fn log_info(message: &str) {
-    use std::io::Write;
+    if LOGGING_ENABLED.load(Ordering::Relaxed) {
+        log_with_level("INFO", message);
+    }
+}
 
+pub fn log_debug(message: &str) {
+    if LOGGING_ENABLED.load(Ordering::Relaxed) {
+        log_with_level("DEBUG", message);
+    }
+}
+
+fn log_with_level(level: &str, message: &str) {
     let log_message = format!(
-        "[INFO] {}: {}\n",
+        "[{}] {}: {}\n",
+        level,
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
         message
     );
 
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("tudiff_main_info.log")
-    {
-        let _ = file.write_all(log_message.as_bytes());
+    if let Ok(mut log_file_guard) = LOG_FILE.lock() {
+        if let Some(ref mut file) = *log_file_guard {
+            let _ = file.write_all(log_message.as_bytes());
+            let _ = file.flush();
+        }
     }
 }

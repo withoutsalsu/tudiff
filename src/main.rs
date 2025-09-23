@@ -16,10 +16,16 @@ struct Args {
 
     #[arg(long, help = "Use simple text output instead of TUI")]
     simple: bool,
+
+    #[arg(short, long, help = "Enable verbose logging")]
+    verbose: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Initialize logging based on verbose flag
+    tudiff::utils::init_logging(args.verbose);
 
     let (dir1, dir2) = match (args.dir1, args.dir2) {
         (Some(d1), Some(d2)) => (d1, d2),

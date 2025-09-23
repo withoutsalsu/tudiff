@@ -46,7 +46,12 @@ Rust로 작성된 TUI 기반 디렉토리 비교 도구 - Beyond Compare 스타�
 ```bash
 git clone https://github.com/withoutsalsu/tudiff.git
 cd tudiff
+
+# 빌드만 실행
 cargo build --release
+
+# 또는 cargo bin 디렉토리에 설치
+cargo install --path .
 ```
 
 ### 사용법
@@ -57,6 +62,9 @@ cargo run -- <dir1> <dir2>
 
 # 릴리스 버전 실행
 ./target/release/tudiff <dir1> <dir2>
+
+# cargo install로 설치한 경우
+tudiff <dir1> <dir2>
 
 # 간단한 텍스트 출력 모드 (TUI 대신)
 tudiff --simple <dir1> <dir2>
@@ -83,15 +91,16 @@ tudiff --simple ./project-v1 ./project-v2 | grep "\[L\]"
 - **툴바 클릭**: 툴바 버튼을 클릭하여 기능 활성화
 - **필터 모드**: "모든 파일", "다른 파일만", "차이점만"을 클릭하여 필터 모드 전환
 - **액션**: "모두 확장", "모두 축소", "새로고침", "패널 교체"를 클릭
+- **마우스 휠**: 위/아래 스크롤로 파일 목록 탐색
 
 ### 키보드 탐색
 
-- `Up/Down`: 파일/폴더 탐색
-- `Left/Right`: 왼쪽/오른쪽 패널 간 전환
+- `Up/Down` 또는 `j/k`: 파일/폴더 탐색
+- `Left/Right` 또는 `h/l`: 왼쪽/오른쪽 패널 간 전환
 - `Enter`:
   - 폴더의 경우: 확장/축소
   - 파일의 경우: vimdiff로 비교 (양쪽에 모두 존재하는 경우) 또는 vim으로 단일 파일 열기
-- `PageUp/PageDown`: 터미널 높이 기반 반페이지 스크롤
+- `PageUp/PageDown` 또는 `Ctrl+B/Ctrl+F`: 터미널 높이 기반 반페이지 스크롤
 - `Ctrl+Home`: 맨 위로 스크롤
 - `Ctrl+End`: 맨 아래로 스크롤
 - `1`: 모든 파일 표시

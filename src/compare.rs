@@ -88,42 +88,6 @@ pub struct DirectoryComparison {
 }
 
 impl DirectoryComparison {
-    fn log_error(message: &str) {
-        use std::io::Write;
-
-        let log_message = format!("[ERROR] {}: {}\n",
-                                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                                 message);
-
-        // Try to write to tudiff_error.log in current directory
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("tudiff_error.log")
-        {
-            let _ = file.write_all(log_message.as_bytes());
-        }
-
-        // Also print to stderr as fallback
-        eprintln!("{}", log_message.trim());
-    }
-
-    fn log_debug(message: &str) {
-        use std::io::Write;
-
-        let log_message = format!("[DEBUG] {}: {}\n",
-                                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                                 message);
-
-        // Try to write to tudiff_debug.log in current directory
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("tudiff_debug.log")
-        {
-            let _ = file.write_all(log_message.as_bytes());
-        }
-    }
     pub fn new(left_dir: PathBuf, right_dir: PathBuf) -> Result<Self> {
         Self::new_with_logging(left_dir, right_dir, true)
     }
@@ -141,27 +105,41 @@ impl DirectoryComparison {
     where
         F: FnMut(&str),
     {
-        Self::log_debug(&format!("Starting comparison: {} vs {}", left_dir.display(), right_dir.display()));
+        crate::utils::log_debug(&format!(
+            "Starting comparison: {} vs {}",
+            left_dir.display(),
+            right_dir.display()
+        ));
 
         progress_callback("Starting directory scan...");
 
         progress_callback("Scanning left directory...");
-        let left_files = match Self::collect_files_with_progress(&left_dir, &mut progress_callback) {
+        let left_files = match Self::collect_files_with_progress(&left_dir, &mut progress_callback)
+        {
             Ok(files) => files,
             Err(e) => {
-                Self::log_error(&format!("Failed to collect left files from {}: {}", left_dir.display(), e));
+                crate::utils::log_error(&format!(
+                    "Failed to collect left files from {}: {}",
+                    left_dir.display(),
+                    e
+                ));
                 return Err(e);
             }
         };
 
         progress_callback("Scanning right directory...");
-        let right_files = match Self::collect_files_with_progress(&right_dir, &mut progress_callback) {
-            Ok(files) => files,
-            Err(e) => {
-                Self::log_error(&format!("Failed to collect right files from {}: {}", right_dir.display(), e));
-                return Err(e);
-            }
-        };
+        let right_files =
+            match Self::collect_files_with_progress(&right_dir, &mut progress_callback) {
+                Ok(files) => files,
+                Err(e) => {
+                    crate::utils::log_error(&format!(
+                        "Failed to collect right files from {}: {}",
+                        right_dir.display(),
+                        e
+                    ));
+                    return Err(e);
+                }
+            };
 
         progress_callback("Comparing files...");
         let (left_tree, right_tree) = match Self::compare_trees_with_progress(
@@ -173,13 +151,13 @@ impl DirectoryComparison {
         ) {
             Ok(trees) => trees,
             Err(e) => {
-                Self::log_error(&format!("Failed to compare trees: {}", e));
+                crate::utils::log_error(&format!("Failed to compare trees: {}", e));
                 return Err(e);
             }
         };
 
         progress_callback("Complete!");
-        Self::log_debug("Comparison completed successfully");
+        crate::utils::log_debug("Comparison completed successfully");
 
         Ok(Self {
             left_tree,
@@ -489,19 +467,31 @@ impl DirectoryComparison {
                 .or_else(|| right_meta.map(|m| m.is_dir()))
                 .unwrap_or(false);
 
-            Self::log_debug(&format!("Path analysis: {} -> left_meta exists: {}, right_meta exists: {}, is_dir: {}",
-                                   path.display(),
-                                   left_meta.is_some(),
-                                   right_meta.is_some(),
-                                   is_dir));
+            crate::utils::log_debug(&format!(
+                "Path analysis: {} -> left_meta exists: {}, right_meta exists: {}, is_dir: {}",
+                path.display(),
+                left_meta.is_some(),
+                right_meta.is_some(),
+                is_dir
+            ));
 
             if let Some(left) = left_meta {
-                Self::log_debug(&format!("Left metadata for {}: is_dir={}, is_file={}, len={}",
-                                       path.display(), left.is_dir(), left.is_file(), left.len()));
+                crate::utils::log_debug(&format!(
+                    "Left metadata for {}: is_dir={}, is_file={}, len={}",
+                    path.display(),
+                    left.is_dir(),
+                    left.is_file(),
+                    left.len()
+                ));
             }
             if let Some(right) = right_meta {
-                Self::log_debug(&format!("Right metadata for {}: is_dir={}, is_file={}, len={}",
-                                       path.display(), right.is_dir(), right.is_file(), right.len()));
+                crate::utils::log_debug(&format!(
+                    "Right metadata for {}: is_dir={}, is_file={}, len={}",
+                    path.display(),
+                    right.is_dir(),
+                    right.is_file(),
+                    right.len()
+                ));
             }
 
             let status = match (left_meta, right_meta) {
@@ -522,18 +512,29 @@ impl DirectoryComparison {
                             ));
                         }
 
-                        Self::log_debug(&format!("About to compare files: {} vs {}",
-                                               left_path.display(), right_path.display()));
+                        crate::utils::log_debug(&format!(
+                            "About to compare files: {} vs {}",
+                            left_path.display(),
+                            right_path.display()
+                        ));
 
                         if match Self::files_are_same(&left_path, &right_path, left, right) {
                             Ok(same) => {
-                                Self::log_debug(&format!("File comparison completed: {} vs {} -> {}",
-                                                       left_path.display(), right_path.display(), same));
+                                crate::utils::log_debug(&format!(
+                                    "File comparison completed: {} vs {} -> {}",
+                                    left_path.display(),
+                                    right_path.display(),
+                                    same
+                                ));
                                 same
-                            },
+                            }
                             Err(e) => {
-                                Self::log_error(&format!("CRITICAL ERROR in files_are_same: {} vs {} - {}",
-                                                        left_path.display(), right_path.display(), e));
+                                crate::utils::log_error(&format!(
+                                    "CRITICAL ERROR in files_are_same: {} vs {} - {}",
+                                    left_path.display(),
+                                    right_path.display(),
+                                    e
+                                ));
                                 return Err(e);
                             }
                         } {
@@ -739,42 +740,62 @@ impl DirectoryComparison {
         left_meta: &fs::Metadata,
         right_meta: &fs::Metadata,
     ) -> Result<bool> {
-        Self::log_debug(&format!("files_are_same: Starting comparison - {} vs {}",
-                               left.display(), right.display()));
+        crate::utils::log_debug(&format!(
+            "files_are_same: Starting comparison - {} vs {}",
+            left.display(),
+            right.display()
+        ));
 
-        Self::log_debug(&format!("files_are_same: File type check - {} (is_dir: {}, is_file: {}) vs {} (is_dir: {}, is_file: {})",
+        crate::utils::log_debug(&format!("files_are_same: File type check - {} (is_dir: {}, is_file: {}) vs {} (is_dir: {}, is_file: {})",
                                left.display(), left_meta.is_dir(), left_meta.is_file(),
                                right.display(), right_meta.is_dir(), right_meta.is_file()));
 
         // Double check if either path is actually a directory by checking the filesystem directly
         let left_real_meta = match fs::metadata(left) {
             Ok(meta) => {
-                Self::log_debug(&format!("files_are_same: Real filesystem check for {}: is_dir={}, is_file={}",
-                                       left.display(), meta.is_dir(), meta.is_file()));
+                crate::utils::log_debug(&format!(
+                    "files_are_same: Real filesystem check for {}: is_dir={}, is_file={}",
+                    left.display(),
+                    meta.is_dir(),
+                    meta.is_file()
+                ));
                 Some(meta)
-            },
+            }
             Err(e) => {
-                Self::log_debug(&format!("files_are_same: Failed to get real metadata for {}: {}", left.display(), e));
+                crate::utils::log_debug(&format!(
+                    "files_are_same: Failed to get real metadata for {}: {}",
+                    left.display(),
+                    e
+                ));
                 None
             }
         };
 
         let right_real_meta = match fs::metadata(right) {
             Ok(meta) => {
-                Self::log_debug(&format!("files_are_same: Real filesystem check for {}: is_dir={}, is_file={}",
-                                       right.display(), meta.is_dir(), meta.is_file()));
+                crate::utils::log_debug(&format!(
+                    "files_are_same: Real filesystem check for {}: is_dir={}, is_file={}",
+                    right.display(),
+                    meta.is_dir(),
+                    meta.is_file()
+                ));
                 Some(meta)
-            },
+            }
             Err(e) => {
-                Self::log_debug(&format!("files_are_same: Failed to get real metadata for {}: {}", right.display(), e));
+                crate::utils::log_debug(&format!(
+                    "files_are_same: Failed to get real metadata for {}: {}",
+                    right.display(),
+                    e
+                ));
                 None
             }
         };
 
         // If either is actually a directory, return false immediately
-        if left_real_meta.as_ref().map_or(false, |m| m.is_dir()) ||
-           right_real_meta.as_ref().map_or(false, |m| m.is_dir()) {
-            Self::log_debug(&format!("files_are_same: At least one path is actually a directory - {} (is_dir: {}) vs {} (is_dir: {})",
+        if left_real_meta.as_ref().map_or(false, |m| m.is_dir())
+            || right_real_meta.as_ref().map_or(false, |m| m.is_dir())
+        {
+            crate::utils::log_debug(&format!("files_are_same: At least one path is actually a directory - {} (is_dir: {}) vs {} (is_dir: {})",
                                    left.display(),
                                    left_real_meta.as_ref().map_or(false, |m| m.is_dir()),
                                    right.display(),
@@ -783,15 +804,25 @@ impl DirectoryComparison {
         }
 
         if !left.exists() || !right.exists() {
-            Self::log_debug(&format!("files_are_same: One file doesn't exist - {} (exists: {}) vs {} (exists: {})",
-                                   left.display(), left.exists(), right.display(), right.exists()));
+            crate::utils::log_debug(&format!(
+                "files_are_same: One file doesn't exist - {} (exists: {}) vs {} (exists: {})",
+                left.display(),
+                left.exists(),
+                right.display(),
+                right.exists()
+            ));
             return Ok(false);
         }
 
         // Stage 1: File size comparison (fastest)
         if left_meta.len() != right_meta.len() {
-            Self::log_debug(&format!("files_are_same: Different sizes - {} ({} bytes) vs {} ({} bytes)",
-                                   left.display(), left_meta.len(), right.display(), right_meta.len()));
+            crate::utils::log_debug(&format!(
+                "files_are_same: Different sizes - {} ({} bytes) vs {} ({} bytes)",
+                left.display(),
+                left_meta.len(),
+                right.display(),
+                right_meta.len()
+            ));
             return Ok(false);
         }
 
@@ -804,7 +835,7 @@ impl DirectoryComparison {
                 .or_else(|_| right_modified.duration_since(left_modified))
             {
                 if duration_diff.as_secs() >= 1 {
-                    Self::log_debug(&format!("files_are_same: Different modification times - {} vs {} (diff: {} seconds)",
+                    crate::utils::log_debug(&format!("files_are_same: Different modification times - {} vs {} (diff: {} seconds)",
                                            left.display(), right.display(), duration_diff.as_secs()));
                     return Ok(false);
                 }
@@ -813,98 +844,162 @@ impl DirectoryComparison {
 
         // Stage 3: Zero-size files are considered same
         if left_meta.len() == 0 {
-            Self::log_debug(&format!("files_are_same: Zero-size files considered same - {} vs {}",
-                                   left.display(), right.display()));
+            crate::utils::log_debug(&format!(
+                "files_are_same: Zero-size files considered same - {} vs {}",
+                left.display(),
+                right.display()
+            ));
             return Ok(true);
         }
 
         // Stage 4: Small files (<4KB) - content comparison
         if left_meta.len() < 4096 {
-            Self::log_debug(&format!("files_are_same: Using content comparison for small files ({} bytes) - {} vs {}",
-                                   left_meta.len(), left.display(), right.display()));
+            crate::utils::log_debug(&format!(
+                "files_are_same: Using content comparison for small files ({} bytes) - {} vs {}",
+                left_meta.len(),
+                left.display(),
+                right.display()
+            ));
             let left_content = match fs::read(left) {
                 Ok(content) => {
-                    Self::log_debug(&format!("files_are_same: Left content read successfully - {} ({} bytes)",
-                                           left.display(), content.len()));
+                    crate::utils::log_debug(&format!(
+                        "files_are_same: Left content read successfully - {} ({} bytes)",
+                        left.display(),
+                        content.len()
+                    ));
                     content
-                },
+                }
                 Err(e) => {
-                    Self::log_error(&format!("CRITICAL ERROR reading left small file: {} - {}", left.display(), e));
+                    crate::utils::log_error(&format!(
+                        "CRITICAL ERROR reading left small file: {} - {}",
+                        left.display(),
+                        e
+                    ));
                     return Err(e.into());
                 }
             };
             let right_content = match fs::read(right) {
                 Ok(content) => {
-                    Self::log_debug(&format!("files_are_same: Right content read successfully - {} ({} bytes)",
-                                           right.display(), content.len()));
+                    crate::utils::log_debug(&format!(
+                        "files_are_same: Right content read successfully - {} ({} bytes)",
+                        right.display(),
+                        content.len()
+                    ));
                     content
-                },
+                }
                 Err(e) => {
-                    Self::log_error(&format!("CRITICAL ERROR reading right small file: {} - {}", right.display(), e));
+                    crate::utils::log_error(&format!(
+                        "CRITICAL ERROR reading right small file: {} - {}",
+                        right.display(),
+                        e
+                    ));
                     return Err(e.into());
                 }
             };
             let result = left_content == right_content;
-            Self::log_debug(&format!("files_are_same: Small file content comparison result: {} - {} vs {}",
-                                   result, left.display(), right.display()));
+            crate::utils::log_debug(&format!(
+                "files_are_same: Small file content comparison result: {} - {} vs {}",
+                result,
+                left.display(),
+                right.display()
+            ));
             return Ok(result);
         }
 
         // Stage 5: Medium files (<1MB) - hash comparison
         if left_meta.len() < 1024 * 1024 {
-            Self::log_debug(&format!("files_are_same: Using hash comparison for medium files ({} bytes) - {} vs {}",
-                                   left_meta.len(), left.display(), right.display()));
+            crate::utils::log_debug(&format!(
+                "files_are_same: Using hash comparison for medium files ({} bytes) - {} vs {}",
+                left_meta.len(),
+                left.display(),
+                right.display()
+            ));
             return Self::compare_file_hashes(left, right);
         }
 
         // Stage 6: Large files (≥1MB) - compare first 4KB only (quick check)
-        Self::log_debug(&format!("files_are_same: Using head comparison for large files ({} bytes) - {} vs {}",
-                               left_meta.len(), left.display(), right.display()));
+        crate::utils::log_debug(&format!(
+            "files_are_same: Using head comparison for large files ({} bytes) - {} vs {}",
+            left_meta.len(),
+            left.display(),
+            right.display()
+        ));
         Self::compare_file_heads(left, right, 4096)
     }
 
     fn compare_file_hashes(left: &Path, right: &Path) -> Result<bool> {
-        Self::log_debug(&format!("Starting hash comparison: {} vs {}", left.display(), right.display()));
+        crate::utils::log_debug(&format!(
+            "Starting hash comparison: {} vs {}",
+            left.display(),
+            right.display()
+        ));
 
         let left_hash = match Self::calculate_file_hash(left) {
             Ok(hash) => {
-                Self::log_debug(&format!("Left hash calculated successfully: {}", left.display()));
+                crate::utils::log_debug(&format!(
+                    "Left hash calculated successfully: {}",
+                    left.display()
+                ));
                 hash
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("Failed to calculate left hash for {}: {}", left.display(), e));
+                crate::utils::log_error(&format!(
+                    "Failed to calculate left hash for {}: {}",
+                    left.display(),
+                    e
+                ));
                 return Err(e);
             }
         };
 
         let right_hash = match Self::calculate_file_hash(right) {
             Ok(hash) => {
-                Self::log_debug(&format!("Right hash calculated successfully: {}", right.display()));
+                crate::utils::log_debug(&format!(
+                    "Right hash calculated successfully: {}",
+                    right.display()
+                ));
                 hash
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("Failed to calculate right hash for {}: {}", right.display(), e));
+                crate::utils::log_error(&format!(
+                    "Failed to calculate right hash for {}: {}",
+                    right.display(),
+                    e
+                ));
                 return Err(e);
             }
         };
 
         let result = left_hash == right_hash;
-        Self::log_debug(&format!("Hash comparison result: {} (left: {}, right: {})", result, left.display(), right.display()));
+        crate::utils::log_debug(&format!(
+            "Hash comparison result: {} (left: {}, right: {})",
+            result,
+            left.display(),
+            right.display()
+        ));
         Ok(result)
     }
 
     fn calculate_file_hash(path: &Path) -> Result<String> {
-        Self::log_debug(&format!("Calculating hash for: {}", path.display()));
+        crate::utils::log_debug(&format!("Calculating hash for: {}", path.display()));
 
         // Check if path is a directory first
         let metadata = match fs::metadata(path) {
             Ok(meta) => {
-                Self::log_debug(&format!("Metadata obtained for: {} (is_dir: {}, is_file: {})",
-                                       path.display(), meta.is_dir(), meta.is_file()));
+                crate::utils::log_debug(&format!(
+                    "Metadata obtained for: {} (is_dir: {}, is_file: {})",
+                    path.display(),
+                    meta.is_dir(),
+                    meta.is_file()
+                ));
                 meta
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("Failed to get metadata for path: {} - {}", path.display(), e));
+                crate::utils::log_error(&format!(
+                    "Failed to get metadata for path: {} - {}",
+                    path.display(),
+                    e
+                ));
                 return Err(e.into());
             }
         };
@@ -917,20 +1012,31 @@ impl DirectoryComparison {
 
             let mut hasher = DefaultHasher::new();
             path.hash(&mut hasher);
-            Self::log_debug(&format!("Using directory hash for: {}", path.display()));
+            crate::utils::log_debug(&format!("Using directory hash for: {}", path.display()));
             return Ok(format!("{:x}", hasher.finish()));
         }
 
         // For files, calculate content hash
-        Self::log_debug(&format!("Opening file for hash calculation: {}", path.display()));
+        crate::utils::log_debug(&format!(
+            "Opening file for hash calculation: {}",
+            path.display()
+        ));
         let mut file = match fs::File::open(path) {
             Ok(f) => {
-                Self::log_debug(&format!("File opened successfully: {}", path.display()));
+                crate::utils::log_debug(&format!("File opened successfully: {}", path.display()));
                 f
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("CRITICAL: Failed to open file: {} - {}", path.display(), e));
-                Self::log_error(&format!("File type check - is_file: {}, is_dir: {}", metadata.is_file(), metadata.is_dir()));
+                crate::utils::log_error(&format!(
+                    "CRITICAL: Failed to open file: {} - {}",
+                    path.display(),
+                    e
+                ));
+                crate::utils::log_error(&format!(
+                    "File type check - is_file: {}, is_dir: {}",
+                    metadata.is_file(),
+                    metadata.is_dir()
+                ));
                 return Err(e.into());
             }
         };
@@ -943,7 +1049,12 @@ impl DirectoryComparison {
             let bytes_read = match file.read(&mut buffer) {
                 Ok(n) => n,
                 Err(e) => {
-                    Self::log_error(&format!("Failed to read file: {} after {} bytes - {}", path.display(), total_bytes, e));
+                    crate::utils::log_error(&format!(
+                        "Failed to read file: {} after {} bytes - {}",
+                        path.display(),
+                        total_bytes,
+                        e
+                    ));
                     return Err(e.into());
                 }
             };
@@ -954,69 +1065,125 @@ impl DirectoryComparison {
             total_bytes += bytes_read;
         }
 
-        Self::log_debug(&format!("Hash calculation completed for: {} ({} bytes)", path.display(), total_bytes));
+        crate::utils::log_debug(&format!(
+            "Hash calculation completed for: {} ({} bytes)",
+            path.display(),
+            total_bytes
+        ));
         Ok(format!("{:x}", hasher.finalize()))
     }
 
     fn compare_file_heads(left: &Path, right: &Path, bytes_to_read: usize) -> Result<bool> {
-        Self::log_debug(&format!("Starting file head comparison: {} vs {} ({} bytes)",
-                               left.display(), right.display(), bytes_to_read));
+        crate::utils::log_debug(&format!(
+            "Starting file head comparison: {} vs {} ({} bytes)",
+            left.display(),
+            right.display(),
+            bytes_to_read
+        ));
 
         // Check if either path is a directory
         let left_metadata = match fs::metadata(left) {
             Ok(meta) => {
-                Self::log_debug(&format!("Left metadata: {} (is_dir: {}, is_file: {})",
-                                       left.display(), meta.is_dir(), meta.is_file()));
+                crate::utils::log_debug(&format!(
+                    "Left metadata: {} (is_dir: {}, is_file: {})",
+                    left.display(),
+                    meta.is_dir(),
+                    meta.is_file()
+                ));
                 meta
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("Failed to get left metadata for: {} - {}", left.display(), e));
+                crate::utils::log_error(&format!(
+                    "Failed to get left metadata for: {} - {}",
+                    left.display(),
+                    e
+                ));
                 return Err(e.into());
             }
         };
 
         let right_metadata = match fs::metadata(right) {
             Ok(meta) => {
-                Self::log_debug(&format!("Right metadata: {} (is_dir: {}, is_file: {})",
-                                       right.display(), meta.is_dir(), meta.is_file()));
+                crate::utils::log_debug(&format!(
+                    "Right metadata: {} (is_dir: {}, is_file: {})",
+                    right.display(),
+                    meta.is_dir(),
+                    meta.is_file()
+                ));
                 meta
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("Failed to get right metadata for: {} - {}", right.display(), e));
+                crate::utils::log_error(&format!(
+                    "Failed to get right metadata for: {} - {}",
+                    right.display(),
+                    e
+                ));
                 return Err(e.into());
             }
         };
 
         if left_metadata.is_dir() || right_metadata.is_dir() {
             // If either is a directory, they can't have the same content
-            Self::log_debug(&format!("Skipping directory comparison: {} (is_dir: {}) vs {} (is_dir: {})",
-                     left.display(), left_metadata.is_dir(),
-                     right.display(), right_metadata.is_dir()));
+            crate::utils::log_debug(&format!(
+                "Skipping directory comparison: {} (is_dir: {}) vs {} (is_dir: {})",
+                left.display(),
+                left_metadata.is_dir(),
+                right.display(),
+                right_metadata.is_dir()
+            ));
             return Ok(false);
         }
 
-        Self::log_debug(&format!("Opening left file for head comparison: {}", left.display()));
+        crate::utils::log_debug(&format!(
+            "Opening left file for head comparison: {}",
+            left.display()
+        ));
         let mut left_file = match fs::File::open(left) {
             Ok(f) => {
-                Self::log_debug(&format!("Left file opened successfully: {}", left.display()));
+                crate::utils::log_debug(&format!(
+                    "Left file opened successfully: {}",
+                    left.display()
+                ));
                 f
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("CRITICAL: Failed to open left file: {} - {}", left.display(), e));
-                Self::log_error(&format!("Left file type check - is_file: {}, is_dir: {}", left_metadata.is_file(), left_metadata.is_dir()));
+                crate::utils::log_error(&format!(
+                    "CRITICAL: Failed to open left file: {} - {}",
+                    left.display(),
+                    e
+                ));
+                crate::utils::log_error(&format!(
+                    "Left file type check - is_file: {}, is_dir: {}",
+                    left_metadata.is_file(),
+                    left_metadata.is_dir()
+                ));
                 return Err(e.into());
             }
         };
 
-        Self::log_debug(&format!("Opening right file for head comparison: {}", right.display()));
+        crate::utils::log_debug(&format!(
+            "Opening right file for head comparison: {}",
+            right.display()
+        ));
         let mut right_file = match fs::File::open(right) {
             Ok(f) => {
-                Self::log_debug(&format!("Right file opened successfully: {}", right.display()));
+                crate::utils::log_debug(&format!(
+                    "Right file opened successfully: {}",
+                    right.display()
+                ));
                 f
-            },
+            }
             Err(e) => {
-                Self::log_error(&format!("CRITICAL: Failed to open right file: {} - {}", right.display(), e));
-                Self::log_error(&format!("Right file type check - is_file: {}, is_dir: {}", right_metadata.is_file(), right_metadata.is_dir()));
+                crate::utils::log_error(&format!(
+                    "CRITICAL: Failed to open right file: {} - {}",
+                    right.display(),
+                    e
+                ));
+                crate::utils::log_error(&format!(
+                    "Right file type check - is_file: {}, is_dir: {}",
+                    right_metadata.is_file(),
+                    right_metadata.is_dir()
+                ));
                 return Err(e.into());
             }
         };

@@ -10,7 +10,7 @@ use std::thread;
 use std::time::SystemTime;
 
 use crate::compare::{DirectoryComparison, FileNode, FileStatus};
-use crate::utils::{log_error, log_info};
+// use crate::utils::{log_error, log_info};
 
 #[derive(PartialEq)]
 pub enum AppMode {
@@ -981,6 +981,16 @@ impl App {
                         self.move_selection(1);
                     }
                 }
+                KeyCode::Char('k') => {
+                    if self.mode == AppMode::DirectoryView {
+                        self.move_selection(-1);
+                    }
+                }
+                KeyCode::Char('j') => {
+                    if self.mode == AppMode::DirectoryView {
+                        self.move_selection(1);
+                    }
+                }
                 KeyCode::PageUp => {
                     if self.mode == AppMode::DirectoryView {
                         let half_page = self.calculate_half_page();
@@ -1046,6 +1056,21 @@ impl App {
                         self.prepare_copy();
                     }
                 }
+                KeyCode::Char('h') => {
+                    if self.mode == AppMode::DirectoryView {
+                        // vim-style navigation: h = left
+                        if self.active_panel == 1 {
+                            if let Some(right_selected) = self.right_list_state.selected() {
+                                if right_selected < self.left_items.len() {
+                                    self.left_list_state.select(Some(right_selected));
+                                } else if !self.left_items.is_empty() {
+                                    self.left_list_state.select(Some(self.left_items.len() - 1));
+                                }
+                            }
+                        }
+                        self.active_panel = 0;
+                    }
+                }
                 KeyCode::Char('l') => {
                     if key
                         .modifiers
@@ -1055,6 +1080,41 @@ impl App {
                         && self.can_copy()
                     {
                         self.prepare_copy();
+                    } else if self.mode == AppMode::DirectoryView {
+                        // vim-style navigation: l = right
+                        if self.active_panel == 0 {
+                            if let Some(left_selected) = self.left_list_state.selected() {
+                                if left_selected < self.right_items.len() {
+                                    self.right_list_state.select(Some(left_selected));
+                                } else if !self.right_items.is_empty() {
+                                    self.right_list_state
+                                        .select(Some(self.right_items.len() - 1));
+                                }
+                            }
+                        }
+                        self.active_panel = 1;
+                    }
+                }
+                KeyCode::Char('f') => {
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                        && self.mode == AppMode::DirectoryView
+                    {
+                        // Ctrl+F: Page down (forward)
+                        let half_page = self.calculate_half_page();
+                        self.move_selection(half_page);
+                    }
+                }
+                KeyCode::Char('b') => {
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                        && self.mode == AppMode::DirectoryView
+                    {
+                        // Ctrl+B: Page up (backward)
+                        let half_page = self.calculate_half_page();
+                        self.move_selection(-half_page);
                     }
                 }
                 KeyCode::Enter => {
@@ -1083,8 +1143,21 @@ impl App {
     }
 
     pub fn handle_mouse_event(&mut self, mouse: crossterm::event::MouseEvent) {
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            self.handle_mouse_click(mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.handle_mouse_click(mouse.column, mouse.row);
+            }
+            MouseEventKind::ScrollUp => {
+                if self.mode == AppMode::DirectoryView {
+                    self.move_selection(-3); // Scroll up 3 lines
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if self.mode == AppMode::DirectoryView {
+                    self.move_selection(3); // Scroll down 3 lines
+                }
+            }
+            _ => {}
         }
     }
 

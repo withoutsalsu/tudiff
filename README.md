@@ -50,7 +50,12 @@ _Note: Add actual screenshot once available_
 ```bash
 git clone https://github.com/withoutsalsu/tudiff.git
 cd tudiff
+
+# Build only
 cargo build --release
+
+# Or install to cargo bin directory
+cargo install --path .
 ```
 
 ### Usage
@@ -61,6 +66,9 @@ cargo run -- <dir1> <dir2>
 
 # If built from source
 ./target/release/tudiff <dir1> <dir2>
+
+# If installed with cargo install
+tudiff <dir1> <dir2>
 
 # Use simple text output instead of TUI
 tudiff --simple <dir1> <dir2>
@@ -87,15 +95,16 @@ tudiff --simple ./project-v1 ./project-v2 | grep "\[L\]"
 - **Toolbar clicking**: Click on toolbar buttons to activate functions
 - **Filter modes**: Click on "All Files", "Different", or "Diff Only" to switch filter modes
 - **Actions**: Click on "Expand All", "Collapse All", "Refresh", or "Swap Panels"
+- **Mouse wheel**: Scroll up/down to navigate through files
 
 ### Keyboard Navigation
 
-- `Up/Down`: Navigate files/folders
-- `Left/Right`: Switch between left/right panels
+- `Up/Down` or `j/k`: Navigate files/folders
+- `Left/Right` or `h/l`: Switch between left/right panels
 - `Enter`:
   - For folders: expand/collapse
   - For files: compare with vimdiff (if exists on both sides) or open single file with vim
-- `PageUp/PageDown`: Half-page scroll (based on terminal height)
+- `PageUp/PageDown` or `Ctrl+B/Ctrl+F`: Half-page scroll (based on terminal height)
 - `Ctrl+Home`: Scroll to top
 - `Ctrl+End`: Scroll to bottom
 - `1`: Show all files
