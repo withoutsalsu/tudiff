@@ -15,8 +15,6 @@ A TUI-based directory comparison tool written in Rust - Beyond Compare style fil
 
 ![tudiff in action](https://raw.githubusercontent.com/withoutsalsu/tudiff/main/assets/screenshot.png)
 
-_Note: Add actual screenshot once available_
-
 ## Features
 
 - **Dual-panel directory trees**: Side-by-side comparison of two directories

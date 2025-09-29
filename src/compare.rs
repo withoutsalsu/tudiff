@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sha2::{Digest, Sha256};
+use crc32fast::Hasher as Crc32Hasher;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
@@ -826,21 +826,7 @@ impl DirectoryComparison {
             return Ok(false);
         }
 
-        // Stage 2: Modification time comparison (fast) - consider different only if 1+ second difference
-        if let (Ok(left_modified), Ok(right_modified)) =
-            (left_meta.modified(), right_meta.modified())
-        {
-            if let Ok(duration_diff) = left_modified
-                .duration_since(right_modified)
-                .or_else(|_| right_modified.duration_since(left_modified))
-            {
-                if duration_diff.as_secs() >= 1 {
-                    crate::utils::log_debug(&format!("files_are_same: Different modification times - {} vs {} (diff: {} seconds)",
-                                           left.display(), right.display(), duration_diff.as_secs()));
-                    return Ok(false);
-                }
-            }
-        }
+        // Stage 2: Skip time comparison (removed for reliability)
 
         // Stage 3: Zero-size files are considered same
         if left_meta.len() == 0 {
@@ -906,15 +892,15 @@ impl DirectoryComparison {
             return Ok(result);
         }
 
-        // Stage 5: Medium files (<1MB) - hash comparison
+        // Stage 5: Medium files (<1MB) - CRC32 comparison (faster than SHA256)
         if left_meta.len() < 1024 * 1024 {
             crate::utils::log_debug(&format!(
-                "files_are_same: Using hash comparison for medium files ({} bytes) - {} vs {}",
+                "files_are_same: Using CRC32 comparison for medium files ({} bytes) - {} vs {}",
                 left_meta.len(),
                 left.display(),
                 right.display()
             ));
-            return Self::compare_file_hashes(left, right);
+            return Self::compare_file_crc32(left, right);
         }
 
         // Stage 6: Large files (≥1MB) - compare first 4KB only (quick check)
@@ -927,24 +913,25 @@ impl DirectoryComparison {
         Self::compare_file_heads(left, right, 4096)
     }
 
-    fn compare_file_hashes(left: &Path, right: &Path) -> Result<bool> {
+    fn compare_file_crc32(left: &Path, right: &Path) -> Result<bool> {
         crate::utils::log_debug(&format!(
-            "Starting hash comparison: {} vs {}",
+            "Starting CRC32 comparison: {} vs {}",
             left.display(),
             right.display()
         ));
 
-        let left_hash = match Self::calculate_file_hash(left) {
-            Ok(hash) => {
+        let left_crc = match Self::calculate_file_crc32(left) {
+            Ok(crc) => {
                 crate::utils::log_debug(&format!(
-                    "Left hash calculated successfully: {}",
-                    left.display()
+                    "Left CRC32 calculated successfully: {} (0x{:08x})",
+                    left.display(),
+                    crc
                 ));
-                hash
+                crc
             }
             Err(e) => {
                 crate::utils::log_error(&format!(
-                    "Failed to calculate left hash for {}: {}",
+                    "Failed to calculate left CRC32 for {}: {}",
                     left.display(),
                     e
                 ));
@@ -952,17 +939,18 @@ impl DirectoryComparison {
             }
         };
 
-        let right_hash = match Self::calculate_file_hash(right) {
-            Ok(hash) => {
+        let right_crc = match Self::calculate_file_crc32(right) {
+            Ok(crc) => {
                 crate::utils::log_debug(&format!(
-                    "Right hash calculated successfully: {}",
-                    right.display()
+                    "Right CRC32 calculated successfully: {} (0x{:08x})",
+                    right.display(),
+                    crc
                 ));
-                hash
+                crc
             }
             Err(e) => {
                 crate::utils::log_error(&format!(
-                    "Failed to calculate right hash for {}: {}",
+                    "Failed to calculate right CRC32 for {}: {}",
                     right.display(),
                     e
                 ));
@@ -970,18 +958,19 @@ impl DirectoryComparison {
             }
         };
 
-        let result = left_hash == right_hash;
+        let result = left_crc == right_crc;
         crate::utils::log_debug(&format!(
-            "Hash comparison result: {} (left: {}, right: {})",
+            "CRC32 comparison result: {} (left: 0x{:08x}, right: 0x{:08x})",
             result,
-            left.display(),
-            right.display()
+            left_crc,
+            right_crc
         ));
         Ok(result)
     }
 
-    fn calculate_file_hash(path: &Path) -> Result<String> {
-        crate::utils::log_debug(&format!("Calculating hash for: {}", path.display()));
+
+    fn calculate_file_crc32(path: &Path) -> Result<u32> {
+        crate::utils::log_debug(&format!("Calculating CRC32 for: {}", path.display()));
 
         // Check if path is a directory first
         let metadata = match fs::metadata(path) {
@@ -1005,20 +994,19 @@ impl DirectoryComparison {
         };
 
         if metadata.is_dir() {
-            // For directories, return a fixed hash based on the path
-            // This prevents "Is a directory" errors
+            // For directories, return a fixed CRC32 based on the path
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
 
             let mut hasher = DefaultHasher::new();
             path.hash(&mut hasher);
-            crate::utils::log_debug(&format!("Using directory hash for: {}", path.display()));
-            return Ok(format!("{:x}", hasher.finish()));
+            crate::utils::log_debug(&format!("Using directory CRC32 for: {}", path.display()));
+            return Ok(hasher.finish() as u32);
         }
 
-        // For files, calculate content hash
+        // For files, calculate content CRC32
         crate::utils::log_debug(&format!(
-            "Opening file for hash calculation: {}",
+            "Opening file for CRC32 calculation: {}",
             path.display()
         ));
         let mut file = match fs::File::open(path) {
@@ -1032,16 +1020,11 @@ impl DirectoryComparison {
                     path.display(),
                     e
                 ));
-                crate::utils::log_error(&format!(
-                    "File type check - is_file: {}, is_dir: {}",
-                    metadata.is_file(),
-                    metadata.is_dir()
-                ));
                 return Err(e.into());
             }
         };
 
-        let mut hasher = Sha256::new();
+        let mut hasher = Crc32Hasher::new();
         let mut buffer = [0; 8192];
         let mut total_bytes = 0;
 
@@ -1065,13 +1048,16 @@ impl DirectoryComparison {
             total_bytes += bytes_read;
         }
 
+        let crc = hasher.finalize();
         crate::utils::log_debug(&format!(
-            "Hash calculation completed for: {} ({} bytes)",
+            "CRC32 calculation completed for: {} ({} bytes) -> 0x{:08x}",
             path.display(),
-            total_bytes
+            total_bytes,
+            crc
         ));
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(crc)
     }
+
 
     fn compare_file_heads(left: &Path, right: &Path, bytes_to_read: usize) -> Result<bool> {
         crate::utils::log_debug(&format!(
