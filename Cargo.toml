@@ -2,9 +2,9 @@
 name = "tudiff"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["withoutsalsu <rsforpi@gmail.com>"]
 license = "MIT"
-description = "A TUI-based directory comparison tool written in Rust - Beyond Compare style file comparator"
+description = "A high-performance terminal directory comparison tool written in Rust - bringing Beyond Compare's intuitive interface to the command line."
 homepage = "https://github.com/withoutsalsu/tudiff"
 repository = "https://github.com/withoutsalsu/tudiff"
 readme = "README.md"
@@ -13,7 +13,9 @@ categories = ["command-line-utilities", "filesystem"]
 exclude = [
     ".git*",
     "target/",
-    "*.tmp"
+    "*.tmp",
+    "*.sh",
+    "CLAUDE.md",
 ]
 
 [[bin]]

@@ -7,7 +7,7 @@
 
 <!-- [![GitHub](https://img.shields.io/github/stars/withoutsalsu/tudiff?style=social)](https://github.com/withoutsalsu/tudiff) -->
 
-A TUI-based directory comparison tool written in Rust - Beyond Compare style file comparator.
+A high-performance terminal directory comparison tool written in Rust - bringing Beyond Compare's intuitive interface to the command line.
 
 🇰🇷 [한글 문서](README_KO.md)
 
@@ -17,23 +17,23 @@ A TUI-based directory comparison tool written in Rust - Beyond Compare style fil
 
 ## Features
 
-- **Dual-panel directory trees**: Side-by-side comparison of two directories
-- **Color coding**:
+- **Dual-panel directory trees**: Side-by-side directory comparison for easy visualization
+- **Smart color coding**:
   - Gray: Identical files/folders
-  - Red: Different files
-  - Blue: Files/folders that exist on one side only
-- **Folder expansion/collapse**: Use Enter key to expand or collapse folders
-- **Synchronized navigation**: Scroll and folder expansion states are synchronized between panels
-- **file comparison**: File content comparison using vimdiff
+  - Red: Files with different content
+  - Blue: Files/folders on one side only
+- **Folder navigation**: Expand or collapse folders with Enter key for quick exploration
+- **Synchronized scrolling**: Scroll position and folder expansion automatically synced between panels
+- **Fast file comparison**: View file differences instantly with vimdiff
 - **Three filter modes**:
-  - All files (shows everything)
-  - Different files (shows only files that differ)
-  - Different files excluding orphans (shows only files that exist on both sides but are different)
-- **Interactive toolbar**: Click on toolbar buttons to activate functions
-- **Smart copy functionality**: Copy files with state preservation
-  - Preserves cursor position and expansion state after copy operations
-  - Maintains file attributes (timestamps, permissions) during copy
-- **Terminal-safe**: Proper cursor restoration and panic-safe cleanup
+  - Full view: Display all files and folders
+  - Difference view: Show only changed items
+  - Diff only: Show files that exist on both sides but differ
+- **Interactive toolbar**: Click toolbar buttons with your mouse
+- **Smart file copy**: Copy files while preserving state
+  - Keeps cursor position and folder expansion after copy
+  - Preserves file attributes (timestamps, permissions)
+- **Safe terminal management**: Restores cursor state even on abnormal exit
 
 ## Installation and Usage
 
@@ -68,9 +68,14 @@ cargo run -- <dir1> <dir2>
 # If installed with cargo install
 tudiff <dir1> <dir2>
 
-# Use simple text output instead of TUI
+# Use simple text output instead of TUI (for scripting/piping)
 tudiff --simple <dir1> <dir2>
 cargo run -- --simple <dir1> <dir2>
+
+# Enable verbose logging (creates tudiff.log file)
+tudiff --verbose <dir1> <dir2>
+tudiff -v <dir1> <dir2>
+cargo run -- --verbose <dir1> <dir2>
 ```
 
 **Example:**
@@ -84,6 +89,9 @@ tudiff ~/Documents /backup/Documents
 
 # Use simple text output for scripting or piping
 tudiff --simple ./project-v1 ./project-v2 | grep "\[L\]"
+
+# Enable verbose logging for debugging
+tudiff --verbose ./project-v1 ./project-v2
 ```
 
 ## Controls
@@ -135,25 +143,24 @@ tudiff --simple ./project-v1 ./project-v2 | grep "\[L\]"
 
 ## File Comparison Algorithm
 
-Uses multi-stage comparison for performance optimization:
+Fast and accurate comparison using step-by-step processing:
 
-1. **File size comparison** (fastest)
-2. **Modification time comparison** (1-second tolerance to handle filesystem differences)
-3. **Empty file handling** (0-byte files are considered identical)
-4. **Small files** (< 4KB): Full content comparison
-5. **Medium files** (< 1MB): SHA256 hash comparison
-6. **Large files** (≥ 1MB): Compare first 4KB only
+1. **Stage 1: File size comparison** (fastest) - Different sizes mean different files
+2. **Stage 2: Empty file handling** - 0-byte files are considered identical
+3. **Stage 3: Small files** (< 4KB) - Full content comparison
+4. **Stage 4: Medium files** (< 1MB) - Fast CRC32 hash comparison
+5. **Stage 5: Large files** (≥ 1MB) - Compare first 4KB only for quick processing
 
-**Note**: This algorithm provides excellent performance for large directories while maintaining accuracy for most use cases.
+**Note**: This approach provides both speed and accuracy even for large directories.
 
 ## UI Enhancements
 
-### Interactive Interface
+### User-friendly Interface
 
-- **Clickable toolbar**: All toolbar buttons are clickable with mouse
-- **Enhanced keyboard shortcuts**: Shortcuts displayed with highlighted keys in red (e.g., (1), (2), (3))
-- **File information display**: Each file/folder shows size and modification date on the right side
-- **Color-coded interface**: Different colors for different file states and UI elements
+- **Mouse support**: Click any toolbar button with your mouse
+- **Shortcut hints**: Shortcuts highlighted in red for easy reference (e.g., (1), (2), (3))
+- **File information**: File size and modification date shown next to each item
+- **Color-coded status**: Different colors for different file states for easy recognition
 
 ### Default Sorting
 
@@ -162,37 +169,37 @@ Uses multi-stage comparison for performance optimization:
 
 ## Advanced Features
 
-### Smart Folder Status Detection
+### Smart Folder Status
 
-Folders inherit status from their children:
+Folder colors reflect the status of their contents:
 
-- **Red**: If any child file/folder is different
-- **Blue**: If folder exists only on one side
-- **Gray**: If all children are identical
+- **Red**: One or more items inside have been changed
+- **Blue**: Folder exists on one side only
+- **Gray**: All items inside are identical
 
-This recursive status detection helps quickly identify directories with changes.
+This helps you quickly find folders with changes.
 
 ### Terminal State Management
 
-- **Cursor restoration**: Proper cursor blinking restoration after exit
-- **Panic-safe cleanup**: Terminal state is restored even on program crashes
-- **Cross-platform**: Works on Linux, macOS, and Windows terminals
+- **Automatic cursor restoration**: Terminal cursor automatically restored on exit
+- **Safe exit**: Terminal state restored even on crashes
+- **Cross-platform**: Works on Linux, macOS, and Windows
 
 ### Performance Optimizations
 
-- **Background operations**: Large directory scans run in background with progress bars
-- **Memory efficient**: Streams directory contents without loading everything into memory
-- **Lazy loading**: Tree nodes are populated on-demand
-- **Synchronized scrolling**: Both panels scroll together for easy comparison
+- **Background scanning**: Large directories scanned in background with progress display
+- **Memory efficient**: Streaming approach saves memory when processing large directories
+- **Load on demand**: Tree nodes created only when needed to reduce initial load time
+- **Scroll sync**: Both panels scroll together automatically for easy comparison
 
 ### Error Handling
 
-- **Smart editor fallbacks**:
-  - File comparison: vimdiff → vim -d → diff (with user wait)
-  - Single file viewing: vim → vi → nano → cat (read-only with user wait)
-- **Permission handling**: Continues operation even with permission-denied files
-- **Network filesystems**: Handles slow/unreliable network mounts gracefully
-- **Cross-platform compatibility**: Works even on minimal systems without advanced editors
+- **Smart editor selection**:
+  - File comparison: vimdiff → vim -d → diff (automatically picks available editor)
+  - Single file view: vim → vi → nano → cat (adapts to your system)
+- **Permission handling**: Skips inaccessible files and continues scanning
+- **Network filesystems**: Handles slow or unstable network drives gracefully
+- **Minimal requirements**: Works with basic system tools only
 
 ## Use Cases
 
@@ -265,7 +272,7 @@ Key Rust crates:
 - `clap`: Command line argument parsing
 - `walkdir`: Efficient directory traversal
 - `similar`: Text difference algorithms
-- `sha2`: Cryptographic hash functions
+- `crc32fast`: Fast CRC32 checksum calculation
 - `anyhow`: Error handling and context
 
 ## License
