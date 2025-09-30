@@ -1,11 +1,9 @@
 # tudiff
 
-<!-- [![Crates.io](https://img.shields.io/crates/v/tudiff)](https://crates.io/crates/tudiff) -->
-
+[![Crates.io](https://img.shields.io/crates/v/tudiff)](https://crates.io/crates/tudiff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
-
-<!-- [![GitHub](https://img.shields.io/github/stars/withoutsalsu/tudiff?style=social)](https://github.com/withoutsalsu/tudiff) -->
+[![GitHub](https://img.shields.io/github/stars/withoutsalsu/tudiff?style=social)](https://github.com/withoutsalsu/tudiff)
 
 A high-performance terminal directory comparison tool written in Rust - bringing Beyond Compare's intuitive interface to the command line.
 
@@ -42,6 +40,12 @@ A high-performance terminal directory comparison tool written in Rust - bringing
 - Rust (1.70+)
 - vim or nano (for file comparison)
 - Terminal with Unicode support (for emoji icons)
+
+### Install from crates.io
+
+```bash
+cargo install tudiff
+```
 
 ### Install from Source
 

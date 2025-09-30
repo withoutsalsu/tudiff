@@ -1,9 +1,9 @@
 # tudiff
 
+[![Crates.io](https://img.shields.io/crates/v/tudiff)](https://crates.io/crates/tudiff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
-
-<!-- [![GitHub](https://img.shields.io/github/stars/withoutsalsu/tudiff?style=social)](https://github.com/withoutsalsu/tudiff) -->
+[![GitHub](https://img.shields.io/github/stars/withoutsalsu/tudiff?style=social)](https://github.com/withoutsalsu/tudiff)
 
 Rust로 작성된 고성능 터미널 디렉토리 비교 도구 - Beyond Compare의 직관적인 인터페이스를 터미널 환경으로 가져온 파일 비교 도구입니다.
 
@@ -41,7 +41,13 @@ Rust로 작성된 고성능 터미널 디렉토리 비교 도구 - Beyond Compar
 - vim 또는 nano (파일 비교용)
 - 유니코드 지원 터미널 (이모지 아이콘용)
 
-### 빌드
+### crates.io에서 설치
+
+```bash
+cargo install tudiff
+```
+
+### 소스에서 빌드
 
 ```bash
 git clone https://github.com/withoutsalsu/tudiff.git
