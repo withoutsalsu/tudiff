@@ -734,6 +734,15 @@ impl DirectoryComparison {
         }
     }
 
+    pub fn files_are_same_public(
+        left: &Path,
+        right: &Path,
+        left_meta: &fs::Metadata,
+        right_meta: &fs::Metadata,
+    ) -> Result<bool> {
+        Self::files_are_same(left, right, left_meta, right_meta)
+    }
+
     fn files_are_same(
         left: &Path,
         right: &Path,

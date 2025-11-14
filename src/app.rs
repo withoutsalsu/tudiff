@@ -754,23 +754,11 @@ impl App {
                 self.preserve_file_attributes(&copy_info.source_path, &copy_info.target_path)?;
             }
 
-            let source_parent = copy_info.source_path.parent();
-            let is_potentially_large = if let Some(parent) = source_parent {
-                std::fs::read_dir(parent)
-                    .map(|entries| entries.count() > 1000)
-                    .unwrap_or(false)
-            } else {
-                false
-            };
+            // Wait for filesystem sync
+            std::thread::sleep(std::time::Duration::from_millis(100));
 
-            if is_potentially_large {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                // log_info("Large directory detected, using extended sync delay");
-            } else {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-
-            self.start_refresh();
+            // Partial update instead of full refresh
+            self.partial_update_after_copy(&copy_info)?;
         }
 
         self.copy_info = None;
@@ -814,6 +802,233 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn partial_update_after_copy(&mut self, copy_info: &CopyInfo) -> Result<()> {
+        use crate::compare::FileStatus;
+        use std::fs;
+
+        // Calculate paths first
+        let from_left_to_right = copy_info.from_left_to_right;
+        let (source_dir, target_dir) = if from_left_to_right {
+            (self.comparison.left_dir.clone(), self.comparison.right_dir.clone())
+        } else {
+            (self.comparison.right_dir.clone(), self.comparison.left_dir.clone())
+        };
+
+        let source_relative = copy_info.source_path.strip_prefix(&source_dir)
+            .unwrap_or(&copy_info.source_path).to_path_buf();
+        let target_relative = copy_info.target_path.strip_prefix(&target_dir)
+            .unwrap_or(&copy_info.target_path).to_path_buf();
+
+        // Check if files are the same
+        let are_same = Self::check_if_files_same_static(
+            &copy_info.source_path,
+            &copy_info.target_path
+        )?;
+
+        let new_status = if are_same {
+            FileStatus::Same
+        } else {
+            FileStatus::Different
+        };
+
+        // Get target file metadata
+        let target_metadata = fs::metadata(&copy_info.target_path).ok();
+        let target_size = target_metadata.as_ref().and_then(|m| {
+            if m.is_file() { Some(m.len()) } else { None }
+        });
+        let target_modified = target_metadata.as_ref().and_then(|m| m.modified().ok());
+
+        // Update nodes
+        if from_left_to_right {
+            // Update parent folder names (empty nodes)
+            Self::update_parent_folder_names(&mut self.comparison.right_tree, &target_relative, &target_dir);
+
+            // Update right tree
+            if let Some(target_node) = Self::find_node_in_tree_by_path(
+                &mut self.comparison.right_tree,
+                &target_relative
+            ) {
+                // If it was an empty node, update name and metadata
+                if target_node.name.is_empty() {
+                    if let Some(file_name) = copy_info.target_path.file_name() {
+                        target_node.name = file_name.to_string_lossy().to_string();
+                    }
+                }
+                target_node.status = new_status;
+                target_node.size = target_size;
+                target_node.modified = target_modified;
+
+                if let Some(source_node) = Self::find_node_in_tree_by_path(
+                    &mut self.comparison.left_tree,
+                    &source_relative
+                ) {
+                    source_node.status = new_status;
+                }
+            }
+            // Update parent statuses
+            Self::update_parent_statuses_static(&mut self.comparison.left_tree, &source_relative);
+            Self::update_parent_statuses_static(&mut self.comparison.right_tree, &target_relative);
+        } else {
+            // Update parent folder names (empty nodes)
+            Self::update_parent_folder_names(&mut self.comparison.left_tree, &target_relative, &target_dir);
+
+            // Update left tree
+            if let Some(target_node) = Self::find_node_in_tree_by_path(
+                &mut self.comparison.left_tree,
+                &target_relative
+            ) {
+                // If it was an empty node, update name and metadata
+                if target_node.name.is_empty() {
+                    if let Some(file_name) = copy_info.target_path.file_name() {
+                        target_node.name = file_name.to_string_lossy().to_string();
+                    }
+                }
+                target_node.status = new_status;
+                target_node.size = target_size;
+                target_node.modified = target_modified;
+
+                if let Some(source_node) = Self::find_node_in_tree_by_path(
+                    &mut self.comparison.right_tree,
+                    &source_relative
+                ) {
+                    source_node.status = new_status;
+                }
+            }
+            // Update parent statuses
+            Self::update_parent_statuses_static(&mut self.comparison.right_tree, &source_relative);
+            Self::update_parent_statuses_static(&mut self.comparison.left_tree, &target_relative);
+        }
+
+        // Update UI
+        self.update_file_lists();
+
+        // Restore saved state
+        if self.saved_expansion_state.is_some() {
+            self.restore_saved_state_safe();
+        }
+
+        Ok(())
+    }
+
+    fn update_parent_folder_names(tree: &mut FileNode, child_path: &std::path::Path, base_dir: &std::path::Path) {
+        // Collect all parent paths
+        let mut parent_paths = Vec::new();
+        let mut current_path = child_path;
+
+        while let Some(parent) = current_path.parent() {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            parent_paths.push(parent.to_path_buf());
+            current_path = parent;
+        }
+
+        // Set names for empty parent folder nodes
+        for parent_path in parent_paths {
+            if let Some(parent_node) = Self::find_node_in_tree_by_path(tree, &parent_path) {
+                if parent_node.name.is_empty() && parent_node.is_dir {
+                    // Get actual folder name from filesystem
+                    let full_path = base_dir.join(&parent_path);
+                    if let Some(folder_name) = full_path.file_name() {
+                        parent_node.name = folder_name.to_string_lossy().to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    fn find_node_in_tree_by_path<'a>(
+        node: &'a mut FileNode,
+        target_path: &std::path::Path,
+    ) -> Option<&'a mut FileNode> {
+        // Compare current node path with target path
+        if node.path.ends_with(target_path) || target_path == node.path.as_path() {
+            return Some(node);
+        }
+
+        // Search child nodes recursively
+        for child in &mut node.children {
+            if let Some(found) = Self::find_node_in_tree_by_path(child, target_path) {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+
+    fn check_if_files_same_static(left_path: &PathBuf, right_path: &PathBuf) -> Result<bool> {
+        use std::fs;
+        use crate::compare::DirectoryComparison;
+
+        if !left_path.exists() || !right_path.exists() {
+            return Ok(false);
+        }
+
+        let left_meta = fs::metadata(left_path)?;
+        let right_meta = fs::metadata(right_path)?;
+
+        // For directories, return false (need to compare children)
+        if left_meta.is_dir() || right_meta.is_dir() {
+            return Ok(false);
+        }
+
+        DirectoryComparison::files_are_same_public(left_path, right_path, &left_meta, &right_meta)
+    }
+
+    fn update_parent_statuses_static(tree: &mut FileNode, child_path: &std::path::Path) {
+        use crate::compare::FileStatus;
+
+        // Collect all parent paths
+        let mut parent_paths = Vec::new();
+        let mut current_path = child_path;
+
+        while let Some(parent) = current_path.parent() {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            parent_paths.push(parent.to_path_buf());
+            current_path = parent;
+        }
+
+        // Update parent statuses in reverse order
+        parent_paths.reverse();
+        for parent_path in parent_paths {
+            if let Some(parent_node) = Self::find_node_in_tree_by_path(tree, &parent_path) {
+                // Check children statuses to determine parent status
+                let child_statuses: Vec<FileStatus> = parent_node.children.iter()
+                    .map(|c| c.status)
+                    .collect();
+
+                if child_statuses.is_empty() {
+                    continue;
+                }
+
+                let has_different = child_statuses.iter().any(|&s| s == FileStatus::Different);
+                let has_left_only = child_statuses.iter().any(|&s| s == FileStatus::LeftOnly);
+                let has_right_only = child_statuses.iter().any(|&s| s == FileStatus::RightOnly);
+                let has_same = child_statuses.iter().any(|&s| s == FileStatus::Same);
+
+                let new_status = if has_different {
+                    FileStatus::Different
+                } else if has_left_only && has_right_only {
+                    FileStatus::Different
+                } else if has_left_only && has_same {
+                    FileStatus::Different
+                } else if has_right_only && has_same {
+                    FileStatus::Different
+                } else if has_left_only {
+                    FileStatus::LeftOnly
+                } else if has_right_only {
+                    FileStatus::RightOnly
+                } else {
+                    FileStatus::Same
+                };
+
+                parent_node.status = new_status;
+            }
+        }
     }
 
     pub fn cancel_copy(&mut self) {
