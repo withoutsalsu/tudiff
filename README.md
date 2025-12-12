@@ -31,6 +31,9 @@ A high-performance terminal directory comparison tool written in Rust - bringing
 - **Smart file copy**: Copy files while preserving state
   - Keeps cursor position and folder expansion after copy
   - Preserves file attributes (timestamps, permissions)
+- **File/folder deletion**: Delete files and folders with confirmation dialog
+  - Shows detailed information (file count, folder count, total size)
+  - Confirmation popup prevents accidental deletion
 - **Safe terminal management**: Restores cursor state even on abnormal exit
 
 ## Installation and Usage
@@ -125,6 +128,7 @@ tudiff --verbose ./project-v1 ./project-v2
 - `F5`: Refresh directories
 - `s`: Swap panel contents
 - `Ctrl+R` / `Ctrl+L`: Copy selected file (left-to-right / right-to-left)
+- `Delete`: Delete selected file or folder
 - `q` or `Esc`: Exit
 
 ### Screen Layout
