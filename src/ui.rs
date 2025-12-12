@@ -9,7 +9,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::app::{App, AppMode, CopyInfo, FilterMode};
+use crate::app::{App, AppMode, CopyInfo, DeleteInfo, FilterMode};
 use crate::compare::FileStatus;
 use crate::utils::{format_file_size, format_modified_time, truncate_path};
 
@@ -20,6 +20,10 @@ pub fn draw_ui<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> anyhow:
         AppMode::CopyConfirm => {
             draw_directory_view(f, app);
             draw_copy_confirm_popup(f, app);
+        }
+        AppMode::DeleteConfirm => {
+            draw_directory_view(f, app);
+            draw_delete_confirm_popup(f, app);
         }
     })?;
     Ok(())
@@ -127,6 +131,24 @@ fn draw_toolbar(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Span::styled("Ctrl+L", Style::default().fg(Color::DarkGray))
             }
+        },
+        Span::raw(")"),
+        Span::raw(" │ "),
+        if app.can_delete() {
+            Span::styled("🗑️", Style::default().fg(Color::Red))
+        } else {
+            Span::styled("🗑️", Style::default().fg(Color::DarkGray))
+        },
+        if app.can_delete() {
+            Span::styled(" Delete", Style::default().fg(Color::White))
+        } else {
+            Span::styled(" Delete", Style::default().fg(Color::DarkGray))
+        },
+        Span::raw("("),
+        if app.can_delete() {
+            Span::styled("Del", Style::default().fg(Color::Red))
+        } else {
+            Span::styled("Del", Style::default().fg(Color::DarkGray))
         },
         Span::raw(")"),
         Span::raw(" │ "),
@@ -486,6 +508,128 @@ fn draw_copy_buttons(f: &mut Frame, area: Rect) {
         Span::styled(
             "Esc",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" - Cancel"),
+    ])])
+    .alignment(Alignment::Center);
+    f.render_widget(buttons, area);
+}
+
+fn draw_delete_confirm_popup(f: &mut Frame, app: &App) {
+    if let Some(delete_info) = &app.delete_info {
+        let popup_area = panel_centered_rect(50, 25, f.area(), delete_info.is_left);
+
+        f.render_widget(Clear, popup_area);
+
+        let title = if delete_info.is_left {
+            " 🗑️ Delete from LEFT panel "
+        } else {
+            " 🗑️ Delete from RIGHT panel "
+        };
+
+        let popup_block = Block::default()
+            .title(title)
+            .title_style(
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red));
+
+        let popup_inner = popup_block.inner(popup_area);
+        f.render_widget(popup_block, popup_area);
+
+        let popup_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(2),
+                Constraint::Length(2),
+                Constraint::Length(3),
+                Constraint::Min(0),
+                Constraint::Length(1),
+            ])
+            .split(popup_inner);
+
+        draw_delete_path(f, delete_info, popup_chunks[1], popup_area.width);
+        draw_delete_info(f, delete_info, popup_chunks[3]);
+        draw_delete_buttons(f, popup_chunks[5]);
+    }
+}
+
+fn draw_delete_path(f: &mut Frame, delete_info: &DeleteInfo, area: Rect, popup_width: u16) {
+    let max_path_width = popup_width.saturating_sub(4) as usize;
+    let path = truncate_path(&delete_info.path.display().to_string(), max_path_width);
+
+    let paths = Paragraph::new(vec![
+        Line::from(vec![Span::styled(
+            "⚠️  Are you sure you want to delete?",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![Span::styled(
+            path,
+            Style::default().fg(Color::Red),
+        )]),
+    ])
+    .alignment(Alignment::Center);
+    f.render_widget(paths, area);
+}
+
+fn draw_delete_info(f: &mut Frame, delete_info: &DeleteInfo, area: Rect) {
+    let file_text = if delete_info.file_count == 1 {
+        format!("{} file", delete_info.file_count)
+    } else {
+        format!("{} files", delete_info.file_count)
+    };
+
+    let folder_text = if delete_info.folder_count == 0 {
+        "".to_string()
+    } else if delete_info.folder_count == 1 {
+        format!("{} folder", delete_info.folder_count)
+    } else {
+        format!("{} folders", delete_info.folder_count)
+    };
+
+    let size_text = format_file_size(Some(delete_info.total_bytes));
+
+    let mut info_lines = vec![Line::from(vec![Span::styled(
+        file_text,
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )])];
+
+    if !folder_text.is_empty() {
+        info_lines.push(Line::from(vec![Span::styled(
+            folder_text,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )]));
+    }
+
+    info_lines.push(Line::from(vec![Span::styled(
+        size_text,
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+
+    let info = Paragraph::new(info_lines).alignment(Alignment::Center);
+    f.render_widget(info, area);
+}
+
+fn draw_delete_buttons(f: &mut Frame, area: Rect) {
+    let buttons = Paragraph::new(vec![Line::from(vec![
+        Span::styled(
+            "Enter",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" - Delete  "),
+        Span::styled(
+            "Esc",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" - Cancel"),
     ])])

@@ -18,6 +18,7 @@ pub enum AppMode {
     #[allow(dead_code)]
     FileView,
     CopyConfirm,
+    DeleteConfirm,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -41,6 +42,15 @@ pub struct CopyInfo {
     pub folder_count: usize,
     pub total_bytes: u64,
     pub from_left_to_right: bool,
+}
+
+#[derive(Clone)]
+pub struct DeleteInfo {
+    pub path: PathBuf,
+    pub file_count: usize,
+    pub folder_count: usize,
+    pub total_bytes: u64,
+    pub is_left: bool,
 }
 
 pub struct App {
@@ -76,6 +86,7 @@ pub struct App {
     pub viewport_height: u16,
     pub toolbar_area: Rect,
     pub copy_info: Option<CopyInfo>,
+    pub delete_info: Option<DeleteInfo>,
     saved_left_selection: Option<usize>,
     saved_right_selection: Option<usize>,
     saved_active_panel: usize,
@@ -104,6 +115,7 @@ impl App {
             viewport_height: 24,
             toolbar_area: Rect::default(),
             copy_info: None,
+            delete_info: None,
             saved_left_selection: None,
             saved_right_selection: None,
             saved_active_panel: 0,
@@ -236,6 +248,10 @@ impl App {
             } else if relative_x <= 143 {
                 if self.can_copy() {
                     self.prepare_copy();
+                }
+            } else if relative_x <= 166 {
+                if self.can_delete() {
+                    self.prepare_delete();
                 }
             }
         }
@@ -1036,6 +1052,89 @@ impl App {
         self.mode = AppMode::DirectoryView;
     }
 
+    pub fn can_delete(&self) -> bool {
+        if let Some((name, _status, _path, _is_dir, _size, _modified)) = self.get_selected_item() {
+            !name.is_empty()
+        } else {
+            false
+        }
+    }
+
+    pub fn prepare_delete(&mut self) {
+        if let Some((_, _, path, is_dir, size, _)) = self.get_selected_item() {
+            let is_left = self.active_panel == 0;
+
+            let full_path = if is_left {
+                self.comparison.left_dir.join(path)
+            } else {
+                self.comparison.right_dir.join(path)
+            };
+
+            let (file_count, folder_count, total_bytes) = if *is_dir {
+                self.calculate_dir_stats(&full_path)
+            } else {
+                (1, 0, size.unwrap_or(0))
+            };
+
+            self.delete_info = Some(DeleteInfo {
+                path: full_path,
+                file_count,
+                folder_count,
+                total_bytes,
+                is_left,
+            });
+
+            self.mode = AppMode::DeleteConfirm;
+        }
+    }
+
+    pub fn execute_delete(&mut self) -> Result<()> {
+        if let Some(delete_info) = self.delete_info.clone() {
+            use std::fs;
+
+            self.save_current_state();
+
+            if delete_info.path.is_dir() {
+                fs::remove_dir_all(&delete_info.path)?;
+            } else {
+                fs::remove_file(&delete_info.path)?;
+            }
+
+            // Wait for filesystem sync
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            // Full refresh for reliability
+            let left_dir = self.comparison.left_dir.clone();
+            let right_dir = self.comparison.right_dir.clone();
+
+            match DirectoryComparison::new_silent(left_dir, right_dir) {
+                Ok(new_comparison) => {
+                    self.comparison = new_comparison;
+                    self.comparison.left_tree.expanded = true;
+                    self.comparison.right_tree.expanded = true;
+                    self.update_file_lists();
+
+                    // Restore saved state
+                    if self.saved_expansion_state.is_some() {
+                        self.restore_saved_state_safe();
+                    }
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+
+        self.delete_info = None;
+        self.mode = AppMode::DirectoryView;
+        Ok(())
+    }
+
+    pub fn cancel_delete(&mut self) {
+        self.delete_info = None;
+        self.mode = AppMode::DirectoryView;
+    }
+
     fn save_current_state(&mut self) {
         self.saved_left_selection = self.left_list_state.selected();
         self.saved_right_selection = self.right_list_state.selected();
@@ -1153,8 +1252,15 @@ impl App {
                 KeyCode::Char('q') | KeyCode::Esc => {
                     if self.mode == AppMode::CopyConfirm {
                         self.cancel_copy();
+                    } else if self.mode == AppMode::DeleteConfirm {
+                        self.cancel_delete();
                     } else {
                         return Ok(true); // Signal to exit
+                    }
+                }
+                KeyCode::Delete => {
+                    if self.mode == AppMode::DirectoryView && self.can_delete() {
+                        self.prepare_delete();
                     }
                 }
                 KeyCode::Left => {
@@ -1346,6 +1452,10 @@ impl App {
                     } else if self.mode == AppMode::CopyConfirm {
                         if let Err(e) = self.execute_copy() {
                             eprintln!("Copy failed: {}", e);
+                        }
+                    } else if self.mode == AppMode::DeleteConfirm {
+                        if let Err(e) = self.execute_delete() {
+                            eprintln!("Delete failed: {}", e);
                         }
                     } else {
                         self.mode = AppMode::DirectoryView;
