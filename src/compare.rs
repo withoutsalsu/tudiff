@@ -195,9 +195,21 @@ impl DirectoryComparison {
         let mut count = 0;
 
         for entry in WalkDir::new(dir) {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) {
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            };
             let relative_path = entry.path().strip_prefix(dir)?.to_path_buf();
-            let metadata = entry.metadata()?;
+            let metadata = match entry.metadata() {
+                Ok(m) => m,
+                Err(e) if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) => continue,
+                Err(e) => return Err(e.into()),
+            };
             files.insert(relative_path, metadata);
 
             count += 1;
@@ -224,9 +236,21 @@ impl DirectoryComparison {
         let mut count = 0;
 
         for entry in WalkDir::new(dir) {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) {
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            };
             let relative_path = entry.path().strip_prefix(dir)?.to_path_buf();
-            let metadata = entry.metadata()?;
+            let metadata = match entry.metadata() {
+                Ok(m) => m,
+                Err(e) if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) => continue,
+                Err(e) => return Err(e.into()),
+            };
             files.insert(relative_path, metadata);
 
             count += 1;
@@ -865,6 +889,13 @@ impl DirectoryComparison {
                     content
                 }
                 Err(e) => {
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        crate::utils::log_error(&format!(
+                            "Permission denied reading left small file, treating as different: {}",
+                            left.display()
+                        ));
+                        return Ok(false);
+                    }
                     crate::utils::log_error(&format!(
                         "CRITICAL ERROR reading left small file: {} - {}",
                         left.display(),
@@ -883,6 +914,13 @@ impl DirectoryComparison {
                     content
                 }
                 Err(e) => {
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        crate::utils::log_error(&format!(
+                            "Permission denied reading right small file, treating as different: {}",
+                            right.display()
+                        ));
+                        return Ok(false);
+                    }
                     crate::utils::log_error(&format!(
                         "CRITICAL ERROR reading right small file: {} - {}",
                         right.display(),
@@ -939,6 +977,11 @@ impl DirectoryComparison {
                 crc
             }
             Err(e) => {
+                if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                    if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                        return Ok(false);
+                    }
+                }
                 crate::utils::log_error(&format!(
                     "Failed to calculate left CRC32 for {}: {}",
                     left.display(),
@@ -958,6 +1001,11 @@ impl DirectoryComparison {
                 crc
             }
             Err(e) => {
+                if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                    if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                        return Ok(false);
+                    }
+                }
                 crate::utils::log_error(&format!(
                     "Failed to calculate right CRC32 for {}: {}",
                     right.display(),
@@ -1024,6 +1072,13 @@ impl DirectoryComparison {
                 f
             }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    crate::utils::log_error(&format!(
+                        "Permission denied opening file for CRC32: {}",
+                        path.display()
+                    ));
+                    return Err(e.into());
+                }
                 crate::utils::log_error(&format!(
                     "CRITICAL: Failed to open file: {} - {}",
                     path.display(),
@@ -1088,6 +1143,9 @@ impl DirectoryComparison {
                 meta
             }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    return Ok(false);
+                }
                 crate::utils::log_error(&format!(
                     "Failed to get left metadata for: {} - {}",
                     left.display(),
@@ -1108,6 +1166,9 @@ impl DirectoryComparison {
                 meta
             }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    return Ok(false);
+                }
                 crate::utils::log_error(&format!(
                     "Failed to get right metadata for: {} - {}",
                     right.display(),
@@ -1142,6 +1203,9 @@ impl DirectoryComparison {
                 f
             }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    return Ok(false);
+                }
                 crate::utils::log_error(&format!(
                     "CRITICAL: Failed to open left file: {} - {}",
                     left.display(),
@@ -1169,6 +1233,9 @@ impl DirectoryComparison {
                 f
             }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    return Ok(false);
+                }
                 crate::utils::log_error(&format!(
                     "CRITICAL: Failed to open right file: {} - {}",
                     right.display(),
