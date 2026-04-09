@@ -63,6 +63,18 @@ cargo build --release
 cargo install --path .
 ```
 
+### Build a Static Binary (Linux, no system dependencies)
+
+```bash
+# One command — installs musl target & tools, then builds
+make static
+
+# Binary location
+./target/x86_64-unknown-linux-musl/release/tudiff
+```
+
+The resulting binary has no dynamic library dependencies and can be copied to any Linux machine.
+
 ### Usage
 
 ```bash
@@ -268,7 +280,8 @@ tudiff /old-system/files /new-system/files
 
 **Permission errors:**
 
-- The tool will continue scanning and mark inaccessible files appropriately
+- Inaccessible files and directories are automatically skipped during scanning
+- Files that cannot be read are treated as "Different" and comparison continues
 - Run with appropriate permissions for full access
 
 ## Dependencies

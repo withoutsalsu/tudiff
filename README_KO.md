@@ -63,6 +63,18 @@ cargo build --release
 cargo install --path .
 ```
 
+### 정적 단일 바이너리 빌드 (Linux, 시스템 의존성 없음)
+
+```bash
+# 한 줄로 끝 — musl 타겟과 도구 설치 후 빌드까지 자동
+make static
+
+# 결과물 위치
+./target/x86_64-unknown-linux-musl/release/tudiff
+```
+
+결과 바이너리는 동적 라이브러리 의존성이 없어 어떤 Linux 머신에도 그대로 복사해서 실행할 수 있습니다.
+
 ### 사용법
 
 ```bash
@@ -268,8 +280,9 @@ tudiff /old-system/files /new-system/files
 
 **권한 오류:**
 
-- 도구는 계속 스캔하고 접근할 수 없는 파일을 적절하게 표시함
-- 전체 액세스를 위해 적절한 권한으로 실행
+- 접근 불가능한 파일/폴더는 스캔 중 자동으로 건너뜀
+- 읽을 수 없는 파일은 "다름"으로 처리하고 비교를 계속 진행
+- 전체 액세스가 필요하면 적절한 권한으로 실행
 
 ## 의존성
 
