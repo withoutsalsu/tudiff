@@ -9,7 +9,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::app::{App, AppMode, CopyInfo, DeleteInfo, FilterMode};
+use crate::app::{App, AppMode, CopyInfo, DeleteInfo, FileItem, FilterMode};
 use crate::compare::FileStatus;
 use crate::utils::{format_file_size, format_modified_time, truncate_path};
 
@@ -106,12 +106,10 @@ fn draw_toolbar(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Span::styled("◀️", Style::default().fg(Color::Green))
             }
+        } else if app.active_panel == 0 {
+            Span::styled("▶️", Style::default().fg(Color::DarkGray))
         } else {
-            if app.active_panel == 0 {
-                Span::styled("▶️", Style::default().fg(Color::DarkGray))
-            } else {
-                Span::styled("◀️", Style::default().fg(Color::DarkGray))
-            }
+            Span::styled("◀️", Style::default().fg(Color::DarkGray))
         },
         if app.can_copy() {
             Span::styled("Copy", Style::default().fg(Color::White))
@@ -125,12 +123,10 @@ fn draw_toolbar(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Span::styled("Ctrl+L", Style::default().fg(Color::Red))
             }
+        } else if app.active_panel == 0 {
+            Span::styled("Ctrl+R", Style::default().fg(Color::DarkGray))
         } else {
-            if app.active_panel == 0 {
-                Span::styled("Ctrl+R", Style::default().fg(Color::DarkGray))
-            } else {
-                Span::styled("Ctrl+L", Style::default().fg(Color::DarkGray))
-            }
+            Span::styled("Ctrl+L", Style::default().fg(Color::DarkGray))
         },
         Span::raw(")"),
         Span::raw(" │ "),
@@ -256,21 +252,17 @@ fn draw_right_panel(f: &mut Frame, app: &mut App, area: Rect, panel_width: usize
     );
 }
 
-fn create_list_items(
-    items: &[(
-        String,
-        FileStatus,
-        std::path::PathBuf,
-        bool,
-        Option<u64>,
-        Option<std::time::SystemTime>,
-    )],
-    panel_width: usize,
-) -> Vec<ListItem<'_>> {
+fn create_list_items(items: &[FileItem], panel_width: usize) -> Vec<ListItem<'_>> {
     items
         .iter()
-        .map(|(display_name, status, _, is_dir, size, modified)| {
-            if *is_dir && !display_name.trim().is_empty() {
+        .map(|item| {
+            let display_name = &item.display_name;
+            let status = &item.status;
+            let is_dir = item.is_dir;
+            let size = item.size;
+            let modified = item.modified;
+
+            if is_dir && !display_name.trim().is_empty() {
                 let trimmed = display_name.trim_start();
                 let indent_len = display_name.len() - trimmed.len();
                 let indent = &display_name[..indent_len];
@@ -304,16 +296,15 @@ fn create_list_items(
                 FileStatus::RightOnly => Color::LightBlue,
             };
 
-            if !*is_dir && !display_name.trim().is_empty() {
-                let size_str = format_file_size(*size);
-                let modified_str = format_modified_time(*modified);
+            if !is_dir && !display_name.trim().is_empty() {
+                let size_str = format_file_size(size);
+                let modified_str = format_modified_time(modified);
 
-                let total_width = panel_width;
                 let name_width = display_name.len();
                 let info_width = size_str.len() + 1 + modified_str.len();
 
-                if name_width + info_width + 2 <= total_width {
-                    let padding_width = total_width - name_width - info_width;
+                if name_width + info_width + 2 <= panel_width {
+                    let padding_width = panel_width - name_width - info_width;
                     let padding = " ".repeat(padding_width);
 
                     let line = Line::from(vec![

@@ -12,6 +12,15 @@ use std::time::SystemTime;
 use crate::compare::{DirectoryComparison, FileNode, FileStatus};
 // use crate::utils::{log_error, log_info};
 
+pub struct FileItem {
+    pub display_name: String,
+    pub status: FileStatus,
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+    pub modified: Option<SystemTime>,
+}
+
 #[derive(PartialEq)]
 pub enum AppMode {
     DirectoryView,
@@ -30,7 +39,7 @@ pub enum FilterMode {
 
 enum RefreshMessage {
     Progress(String, f64),
-    Complete(DirectoryComparison),
+    Complete(Box<DirectoryComparison>),
     Error(String),
 }
 
@@ -59,22 +68,8 @@ pub struct App {
     pub active_panel: usize,
     pub left_list_state: ListState,
     pub right_list_state: ListState,
-    pub left_items: Vec<(
-        String,
-        FileStatus,
-        PathBuf,
-        bool,
-        Option<u64>,
-        Option<SystemTime>,
-    )>,
-    pub right_items: Vec<(
-        String,
-        FileStatus,
-        PathBuf,
-        bool,
-        Option<u64>,
-        Option<SystemTime>,
-    )>,
+    pub left_items: Vec<FileItem>,
+    pub right_items: Vec<FileItem>,
     pub file_diff: String,
     pub filter_mode: FilterMode,
     pub is_refreshing: bool,
@@ -146,14 +141,7 @@ impl App {
         node: &FileNode,
         depth: usize,
         filter: FilterMode,
-    ) -> Vec<(
-        String,
-        FileStatus,
-        PathBuf,
-        bool,
-        Option<u64>,
-        Option<SystemTime>,
-    )> {
+    ) -> Vec<FileItem> {
         let mut items = Vec::new();
 
         if depth == 0 {
@@ -180,7 +168,7 @@ impl App {
         };
 
         let display_name = if node.name.is_empty() {
-            format!("{}", indent)
+            indent.to_string()
         } else if icon.is_empty() {
             format!("{}{}", indent, node.name)
         } else {
@@ -201,14 +189,14 @@ impl App {
         };
 
         if should_include {
-            items.push((
+            items.push(FileItem {
                 display_name,
-                node.status,
-                node.path.clone(),
-                node.is_dir,
-                node.size,
-                node.modified,
-            ));
+                status: node.status,
+                path: node.path.clone(),
+                is_dir: node.is_dir,
+                size: node.size,
+                modified: node.modified,
+            });
         }
 
         if node.is_dir && node.expanded {
@@ -249,11 +237,10 @@ impl App {
                 if self.can_copy() {
                     self.prepare_copy();
                 }
-            } else if relative_x <= 166 {
-                if self.can_delete() {
+            } else if relative_x <= 166
+                && self.can_delete() {
                     self.prepare_delete();
                 }
-            }
         }
     }
 
@@ -262,16 +249,7 @@ impl App {
         std::cmp::max(1, (available_height / 2) as i32)
     }
 
-    pub fn get_selected_item(
-        &self,
-    ) -> Option<&(
-        String,
-        FileStatus,
-        PathBuf,
-        bool,
-        Option<u64>,
-        Option<SystemTime>,
-    )> {
+    pub fn get_selected_item(&self) -> Option<&FileItem> {
         let items = if self.active_panel == 0 {
             &self.left_items
         } else {
@@ -292,12 +270,12 @@ impl App {
     }
 
     pub fn can_copy(&self) -> bool {
-        if let Some((name, status, _path, _is_dir, _size, _modified)) = self.get_selected_item() {
-            if name.is_empty() {
+        if let Some(item) = self.get_selected_item() {
+            if item.display_name.is_empty() {
                 return false;
             }
 
-            match status {
+            match item.status {
                 FileStatus::LeftOnly => self.active_panel == 0,
                 FileStatus::RightOnly => self.active_panel == 1,
                 FileStatus::Different | FileStatus::Same => true,
@@ -336,9 +314,9 @@ impl App {
     }
 
     pub fn toggle_folder(&mut self) {
-        if let Some((_, _, path, is_dir, _, _)) = self.get_selected_item() {
-            if *is_dir {
-                let path = path.clone();
+        if let Some(item) = self.get_selected_item() {
+            if item.is_dir {
+                let path = item.path.clone();
                 let current_selected = if self.active_panel == 0 {
                     self.left_list_state.selected()
                 } else {
@@ -624,7 +602,7 @@ impl App {
 
             match result {
                 Ok(comparison) => {
-                    let _ = tx.send(RefreshMessage::Complete(comparison));
+                    let _ = tx.send(RefreshMessage::Complete(Box::new(comparison)));
                 }
                 Err(e) => {
                     let _ = tx.send(RefreshMessage::Error(format!("Error: {}", e)));
@@ -652,7 +630,7 @@ impl App {
                     self.refresh_percentage = percentage;
                 }
                 RefreshMessage::Complete(comparison) => {
-                    self.comparison = comparison;
+                    self.comparison = *comparison;
 
                     self.comparison.left_tree.expanded = true;
                     self.comparison.right_tree.expanded = true;
@@ -693,25 +671,25 @@ impl App {
     }
 
     pub fn prepare_copy(&mut self) {
-        if let Some((_, _, path, is_dir, size, _)) = self.get_selected_item() {
+        if let Some(item) = self.get_selected_item() {
             let from_left_to_right = self.active_panel == 0;
 
             let source_path = if from_left_to_right {
-                self.comparison.left_dir.join(path)
+                self.comparison.left_dir.join(&item.path)
             } else {
-                self.comparison.right_dir.join(path)
+                self.comparison.right_dir.join(&item.path)
             };
 
             let target_path = if from_left_to_right {
-                self.comparison.right_dir.join(path)
+                self.comparison.right_dir.join(&item.path)
             } else {
-                self.comparison.left_dir.join(path)
+                self.comparison.left_dir.join(&item.path)
             };
 
-            let (file_count, folder_count, total_bytes) = if *is_dir {
+            let (file_count, folder_count, total_bytes) = if item.is_dir {
                 self.calculate_dir_stats(&source_path)
             } else {
-                (1, 0, size.unwrap_or(0))
+                (1, 0, item.size.unwrap_or(0))
             };
 
             self.copy_info = Some(CopyInfo {
@@ -837,11 +815,15 @@ impl App {
         let target_relative = copy_info.target_path.strip_prefix(&target_dir)
             .unwrap_or(&copy_info.target_path).to_path_buf();
 
-        // Check if files are the same
-        let are_same = Self::check_if_files_same_static(
-            &copy_info.source_path,
-            &copy_info.target_path
-        )?;
+        // For directories, copying makes both sides identical by definition
+        let are_same = if copy_info.source_path.is_dir() {
+            true
+        } else {
+            Self::check_if_files_same_static(
+                &copy_info.source_path,
+                &copy_info.target_path
+            )?
+        };
 
         let new_status = if are_same {
             FileStatus::Same
@@ -917,6 +899,44 @@ impl App {
             Self::update_parent_statuses_static(&mut self.comparison.left_tree, &target_relative);
         }
 
+        // When copying a directory, recursively update all child nodes to Same
+        if copy_info.source_path.is_dir() {
+            let descendants = if from_left_to_right {
+                Self::collect_descendants_info(&self.comparison.left_tree, &source_relative)
+            } else {
+                Self::collect_descendants_info(&self.comparison.right_tree, &source_relative)
+            };
+
+            {
+                let target_tree = if from_left_to_right {
+                    &mut self.comparison.right_tree
+                } else {
+                    &mut self.comparison.left_tree
+                };
+                for (child_path, child_name) in &descendants {
+                    if let Some(node) = Self::find_node_in_tree_by_path(target_tree, child_path) {
+                        if node.name.is_empty() {
+                            node.name = child_name.clone();
+                        }
+                        node.status = FileStatus::Same;
+                    }
+                }
+            }
+
+            {
+                let source_tree = if from_left_to_right {
+                    &mut self.comparison.left_tree
+                } else {
+                    &mut self.comparison.right_tree
+                };
+                for (child_path, _) in &descendants {
+                    if let Some(node) = Self::find_node_in_tree_by_path(source_tree, child_path) {
+                        node.status = FileStatus::Same;
+                    }
+                }
+            }
+        }
+
         // Update UI
         self.update_file_lists();
 
@@ -955,12 +975,41 @@ impl App {
         }
     }
 
+    fn collect_descendants_info(tree: &FileNode, target_path: &std::path::Path) -> Vec<(PathBuf, String)> {
+        fn find_node<'a>(node: &'a FileNode, target: &std::path::Path) -> Option<&'a FileNode> {
+            if node.path == target {
+                return Some(node);
+            }
+            for child in &node.children {
+                if let Some(found) = find_node(child, target) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        fn collect_all(node: &FileNode, result: &mut Vec<(PathBuf, String)>) {
+            for child in &node.children {
+                result.push((child.path.clone(), child.name.clone()));
+                if child.is_dir {
+                    collect_all(child, result);
+                }
+            }
+        }
+
+        let mut result = Vec::new();
+        if let Some(node) = find_node(tree, target_path) {
+            collect_all(node, &mut result);
+        }
+        result
+    }
+
     fn find_node_in_tree_by_path<'a>(
         node: &'a mut FileNode,
         target_path: &std::path::Path,
     ) -> Option<&'a mut FileNode> {
         // Compare current node path with target path
-        if node.path.ends_with(target_path) || target_path == node.path.as_path() {
+        if node.path == target_path {
             return Some(node);
         }
 
@@ -1021,18 +1070,15 @@ impl App {
                     continue;
                 }
 
-                let has_different = child_statuses.iter().any(|&s| s == FileStatus::Different);
-                let has_left_only = child_statuses.iter().any(|&s| s == FileStatus::LeftOnly);
-                let has_right_only = child_statuses.iter().any(|&s| s == FileStatus::RightOnly);
-                let has_same = child_statuses.iter().any(|&s| s == FileStatus::Same);
+                let has_different = child_statuses.contains(&FileStatus::Different);
+                let has_left_only = child_statuses.contains(&FileStatus::LeftOnly);
+                let has_right_only = child_statuses.contains(&FileStatus::RightOnly);
+                let has_same = child_statuses.contains(&FileStatus::Same);
 
-                let new_status = if has_different {
-                    FileStatus::Different
-                } else if has_left_only && has_right_only {
-                    FileStatus::Different
-                } else if has_left_only && has_same {
-                    FileStatus::Different
-                } else if has_right_only && has_same {
+                let new_status = if has_different
+                    || (has_left_only && (has_right_only || has_same))
+                    || (has_right_only && has_same)
+                {
                     FileStatus::Different
                 } else if has_left_only {
                     FileStatus::LeftOnly
@@ -1053,27 +1099,27 @@ impl App {
     }
 
     pub fn can_delete(&self) -> bool {
-        if let Some((name, _status, _path, _is_dir, _size, _modified)) = self.get_selected_item() {
-            !name.is_empty()
+        if let Some(item) = self.get_selected_item() {
+            !item.display_name.is_empty()
         } else {
             false
         }
     }
 
     pub fn prepare_delete(&mut self) {
-        if let Some((_, _, path, is_dir, size, _)) = self.get_selected_item() {
+        if let Some(item) = self.get_selected_item() {
             let is_left = self.active_panel == 0;
 
             let full_path = if is_left {
-                self.comparison.left_dir.join(path)
+                self.comparison.left_dir.join(&item.path)
             } else {
-                self.comparison.right_dir.join(path)
+                self.comparison.right_dir.join(&item.path)
             };
 
-            let (file_count, folder_count, total_bytes) = if *is_dir {
+            let (file_count, folder_count, total_bytes) = if item.is_dir {
                 self.calculate_dir_stats(&full_path)
             } else {
-                (1, 0, size.unwrap_or(0))
+                (1, 0, item.size.unwrap_or(0))
             };
 
             self.delete_info = Some(DeleteInfo {
@@ -1155,46 +1201,13 @@ impl App {
 
         self.active_panel = self.saved_active_panel;
 
-        use std::io::Write;
-        let mut debug = format!(
-            "=== BEFORE restoration ===\nLeft tree expanded: {}\nRight tree expanded: {}\n",
-            self.comparison.left_tree.expanded, self.comparison.right_tree.expanded
-        );
-
         if let Some((saved_left_tree, saved_right_tree)) = self.saved_expansion_state.take() {
-            debug.push_str(&format!(
-                "Restoring from saved state - Left: {}, Right: {}\n",
-                saved_left_tree.expanded, saved_right_tree.expanded
-            ));
-
-            debug.push_str("=== Current Right Tree (before restore) ===\n");
-            Self::debug_tree_structure(&self.comparison.right_tree, 0, &mut debug);
-
-            debug.push_str("=== Saved Right Tree ===\n");
-            Self::debug_tree_structure(&saved_right_tree, 0, &mut debug);
-
             Self::restore_expansion_state_safe(&mut self.comparison.left_tree, &saved_left_tree);
             Self::restore_expansion_state_safe(&mut self.comparison.right_tree, &saved_right_tree);
-
-            debug.push_str("=== Current Right Tree (after restore) ===\n");
-            Self::debug_tree_structure(&self.comparison.right_tree, 0, &mut debug);
         }
 
         self.comparison.left_tree.expanded = true;
         self.comparison.right_tree.expanded = true;
-
-        debug.push_str(&format!(
-            "=== AFTER restoration ===\nLeft tree expanded: {}\nRight tree expanded: {}\n",
-            self.comparison.left_tree.expanded, self.comparison.right_tree.expanded
-        ));
-
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/tudiff_restore_debug.log")
-        {
-            let _ = file.write_all(debug.as_bytes());
-        }
 
         self.update_file_lists();
 
@@ -1231,18 +1244,6 @@ impl App {
             }) {
                 Self::restore_expansion_state_safe(current_child, saved_child);
             }
-        }
-    }
-
-    fn debug_tree_structure(node: &FileNode, depth: usize, output: &mut String) {
-        let indent = "  ".repeat(depth);
-        output.push_str(&format!(
-            "{}[{}] expanded:{} status:{:?}\n",
-            indent, node.name, node.expanded, node.status
-        ));
-
-        for child in &node.children {
-            Self::debug_tree_structure(child, depth + 1, output);
         }
     }
 
@@ -1440,12 +1441,12 @@ impl App {
                 }
                 KeyCode::Enter => {
                     if self.mode == AppMode::DirectoryView {
-                        if let Some((_, status, path, is_dir, _, _)) = self.get_selected_item() {
-                            if *is_dir {
+                        if let Some(item) = self.get_selected_item() {
+                            if item.is_dir {
                                 self.toggle_folder();
-                            } else if path.to_string_lossy() != "" {
-                                let status = *status;
-                                let path = path.clone();
+                            } else if item.path.to_string_lossy() != "" {
+                                let status = item.status;
+                                let path = item.path.clone();
                                 self.handle_file_comparison(status, path)?;
                             }
                         }

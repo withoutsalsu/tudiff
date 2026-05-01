@@ -89,12 +89,12 @@ pub struct DirectoryComparison {
 
 impl DirectoryComparison {
     pub fn new(left_dir: PathBuf, right_dir: PathBuf) -> Result<Self> {
-        Self::new_with_logging(left_dir, right_dir, true)
+        Self::new_with_logging(left_dir, right_dir)
     }
 
     #[allow(dead_code)]
     pub fn new_silent(left_dir: PathBuf, right_dir: PathBuf) -> Result<Self> {
-        Self::new_with_logging(left_dir, right_dir, false)
+        Self::new_with_logging(left_dir, right_dir)
     }
 
     pub fn new_with_progress<F>(
@@ -167,19 +167,15 @@ impl DirectoryComparison {
         })
     }
 
-    fn new_with_logging(
-        left_dir: PathBuf,
-        right_dir: PathBuf,
-        enable_logging: bool,
-    ) -> Result<Self> {
-        let left_files = Self::collect_files(&left_dir, enable_logging)?;
-        let right_files = Self::collect_files(&right_dir, enable_logging)?;
-        let (left_tree, right_tree) = Self::compare_trees(
+    fn new_with_logging(left_dir: PathBuf, right_dir: PathBuf) -> Result<Self> {
+        let left_files = Self::collect_files(&left_dir)?;
+        let right_files = Self::collect_files(&right_dir)?;
+        let (left_tree, right_tree) = Self::compare_trees_with_progress(
             &left_dir,
             &right_dir,
             &left_files,
             &right_files,
-            enable_logging,
+            &mut |_| {},
         )?;
 
         Ok(Self {
@@ -190,7 +186,10 @@ impl DirectoryComparison {
         })
     }
 
-    fn collect_files(dir: &Path, enable_logging: bool) -> Result<HashMap<PathBuf, fs::Metadata>> {
+    fn collect_files_impl<F: FnMut(&str)>(
+        dir: &Path,
+        progress: &mut F,
+    ) -> Result<HashMap<PathBuf, fs::Metadata>> {
         let mut files = HashMap::new();
         let mut count = 0;
 
@@ -198,7 +197,7 @@ impl DirectoryComparison {
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
-                    if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) {
+                    if e.io_error().is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied) {
                         continue;
                     }
                     return Err(e.into());
@@ -207,22 +206,22 @@ impl DirectoryComparison {
             let relative_path = entry.path().strip_prefix(dir)?.to_path_buf();
             let metadata = match entry.metadata() {
                 Ok(m) => m,
-                Err(e) if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) => continue,
+                Err(e) if e.io_error().is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied) => continue,
                 Err(e) => return Err(e.into()),
             };
             files.insert(relative_path, metadata);
 
             count += 1;
-            if enable_logging && count % 100 == 0 {
-                eprint!(".");
+            if count % 50 == 0 {
+                progress(&format!("Scanning... {} files", count));
             }
         }
 
-        if enable_logging && count >= 100 {
-            eprintln!();
-        }
-
         Ok(files)
+    }
+
+    fn collect_files(dir: &Path) -> Result<HashMap<PathBuf, fs::Metadata>> {
+        Self::collect_files_impl(dir, &mut |_| {})
     }
 
     fn collect_files_with_progress<F>(
@@ -232,205 +231,7 @@ impl DirectoryComparison {
     where
         F: FnMut(&str),
     {
-        let mut files = HashMap::new();
-        let mut count = 0;
-
-        for entry in WalkDir::new(dir) {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) {
-                        continue;
-                    }
-                    return Err(e.into());
-                }
-            };
-            let relative_path = entry.path().strip_prefix(dir)?.to_path_buf();
-            let metadata = match entry.metadata() {
-                Ok(m) => m,
-                Err(e) if e.io_error().map_or(false, |io| io.kind() == std::io::ErrorKind::PermissionDenied) => continue,
-                Err(e) => return Err(e.into()),
-            };
-            files.insert(relative_path, metadata);
-
-            count += 1;
-            if count % 50 == 0 {
-                progress_callback(&format!("Scanning... {} files", count));
-            }
-        }
-
-        Ok(files)
-    }
-
-    fn compare_trees(
-        left_dir: &Path,
-        right_dir: &Path,
-        left_files: &HashMap<PathBuf, fs::Metadata>,
-        right_files: &HashMap<PathBuf, fs::Metadata>,
-        enable_logging: bool,
-    ) -> Result<(FileNode, FileNode)> {
-        let left_name = left_dir
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        let right_name = right_dir
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        let mut left_root =
-            FileNode::new(left_name, left_dir.to_path_buf(), true, FileStatus::Same);
-        let mut right_root =
-            FileNode::new(right_name, right_dir.to_path_buf(), true, FileStatus::Same);
-
-        // Root directory starts expanded
-        left_root.expanded = true;
-        right_root.expanded = true;
-
-        // Collect all unique paths
-        let mut all_paths = std::collections::BTreeSet::new();
-        all_paths.extend(left_files.keys().cloned());
-        all_paths.extend(right_files.keys().cloned());
-
-        let total_paths = all_paths.len();
-        if enable_logging {
-            eprintln!("🔀 Processing {} unique paths...", total_paths);
-        }
-
-        // Convert paths to tree structure
-        let mut processed = 0;
-        for path in all_paths {
-            if path.as_os_str().is_empty() {
-                continue; // Skip root path
-            }
-
-            let left_exists = left_files.contains_key(&path);
-            let right_exists = right_files.contains_key(&path);
-            let left_meta = left_files.get(&path);
-            let right_meta = right_files.get(&path);
-
-            let status = match (left_exists, right_exists) {
-                (true, true) => {
-                    if left_meta.unwrap().is_file() && right_meta.unwrap().is_file() {
-                        // Compare file contents
-                        let left_path = left_dir.join(&path);
-                        let right_path = right_dir.join(&path);
-
-                        if enable_logging && processed % 100 == 0 && processed > 0 {
-                            eprintln!("   🔍 Comparing file: {}", path.display());
-                        }
-
-                        if Self::files_are_same(
-                            &left_path,
-                            &right_path,
-                            left_meta.unwrap(),
-                            right_meta.unwrap(),
-                        )? {
-                            FileStatus::Same
-                        } else {
-                            FileStatus::Different
-                        }
-                    } else {
-                        FileStatus::Same // Assume directories are same for now
-                    }
-                }
-                (true, false) => FileStatus::LeftOnly,
-                (false, true) => FileStatus::RightOnly,
-                (false, false) => unreachable!(),
-            };
-
-            let is_dir = left_meta
-                .map(|m| m.is_dir())
-                .or(right_meta.map(|m| m.is_dir()))
-                .unwrap_or(false);
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            // Insert only items that exist in each panel
-            // For LeftOnly/RightOnly, insert empty nodes on opposite side for alignment
-            match status {
-                FileStatus::Same | FileStatus::Different => {
-                    // Exists on both sides
-                    Self::insert_into_tree(
-                        &mut left_root,
-                        &path,
-                        name.clone(),
-                        is_dir,
-                        status,
-                        true,
-                        left_meta,
-                    )?;
-                    Self::insert_into_tree(
-                        &mut right_root,
-                        &path,
-                        name,
-                        is_dir,
-                        status,
-                        true,
-                        right_meta,
-                    )?;
-                }
-                FileStatus::LeftOnly => {
-                    // Left side only
-                    Self::insert_into_tree(
-                        &mut left_root,
-                        &path,
-                        name.clone(),
-                        is_dir,
-                        status,
-                        true,
-                        left_meta,
-                    )?;
-                    Self::insert_into_tree(
-                        &mut right_root,
-                        &path,
-                        "".to_string(),
-                        is_dir,
-                        status,
-                        false,
-                        None,
-                    )?;
-                }
-                FileStatus::RightOnly => {
-                    // Right side only
-                    Self::insert_into_tree(
-                        &mut left_root,
-                        &path,
-                        "".to_string(),
-                        is_dir,
-                        status,
-                        false,
-                        None,
-                    )?;
-                    Self::insert_into_tree(
-                        &mut right_root,
-                        &path,
-                        name,
-                        is_dir,
-                        status,
-                        true,
-                        right_meta,
-                    )?;
-                }
-            }
-
-            processed += 1;
-        }
-
-        // Sort children at all levels after tree construction
-        Self::sort_tree_recursive(&mut left_root);
-        Self::sort_tree_recursive(&mut right_root);
-
-        // Update folder status based on children's status
-        Self::update_folder_status(&mut left_root);
-        Self::update_folder_status(&mut right_root);
-
-        Ok((left_root, right_root))
+        Self::collect_files_impl(dir, progress_callback)
     }
 
     fn compare_trees_with_progress<F>(
@@ -709,28 +510,19 @@ impl DirectoryComparison {
             node.status
         } else {
             // Analyze children's status
-            let has_different = child_statuses.iter().any(|&s| s == FileStatus::Different);
-            let has_left_only = child_statuses.iter().any(|&s| s == FileStatus::LeftOnly);
-            let has_right_only = child_statuses.iter().any(|&s| s == FileStatus::RightOnly);
-            let has_same = child_statuses.iter().any(|&s| s == FileStatus::Same);
+            let has_different = child_statuses.contains(&FileStatus::Different);
+            let has_left_only = child_statuses.contains(&FileStatus::LeftOnly);
+            let has_right_only = child_statuses.contains(&FileStatus::RightOnly);
+            let has_same = child_statuses.contains(&FileStatus::Same);
 
-            if has_different {
-                // If any child is Different, folder is Different
-                FileStatus::Different
-            } else if has_left_only && has_right_only {
-                // If has both LeftOnly and RightOnly children, folder is Different
-                FileStatus::Different
-            } else if has_left_only && has_same {
-                // If has both LeftOnly and Same children, folder is Different
-                FileStatus::Different
-            } else if has_right_only && has_same {
-                // If has both RightOnly and Same children, folder is Different
+            if has_different
+                || (has_left_only && (has_right_only || has_same))
+                || (has_right_only && has_same)
+            {
                 FileStatus::Different
             } else if has_left_only {
-                // If all children are LeftOnly, folder is LeftOnly
                 FileStatus::LeftOnly
             } else if has_right_only {
-                // If all children are RightOnly, folder is RightOnly
                 FileStatus::RightOnly
             } else {
                 // If all children are Same, folder is Same
@@ -779,71 +571,8 @@ impl DirectoryComparison {
             right.display()
         ));
 
-        crate::utils::log_debug(&format!("files_are_same: File type check - {} (is_dir: {}, is_file: {}) vs {} (is_dir: {}, is_file: {})",
-                               left.display(), left_meta.is_dir(), left_meta.is_file(),
-                               right.display(), right_meta.is_dir(), right_meta.is_file()));
-
-        // Double check if either path is actually a directory by checking the filesystem directly
-        let left_real_meta = match fs::metadata(left) {
-            Ok(meta) => {
-                crate::utils::log_debug(&format!(
-                    "files_are_same: Real filesystem check for {}: is_dir={}, is_file={}",
-                    left.display(),
-                    meta.is_dir(),
-                    meta.is_file()
-                ));
-                Some(meta)
-            }
-            Err(e) => {
-                crate::utils::log_debug(&format!(
-                    "files_are_same: Failed to get real metadata for {}: {}",
-                    left.display(),
-                    e
-                ));
-                None
-            }
-        };
-
-        let right_real_meta = match fs::metadata(right) {
-            Ok(meta) => {
-                crate::utils::log_debug(&format!(
-                    "files_are_same: Real filesystem check for {}: is_dir={}, is_file={}",
-                    right.display(),
-                    meta.is_dir(),
-                    meta.is_file()
-                ));
-                Some(meta)
-            }
-            Err(e) => {
-                crate::utils::log_debug(&format!(
-                    "files_are_same: Failed to get real metadata for {}: {}",
-                    right.display(),
-                    e
-                ));
-                None
-            }
-        };
-
-        // If either is actually a directory, return false immediately
-        if left_real_meta.as_ref().map_or(false, |m| m.is_dir())
-            || right_real_meta.as_ref().map_or(false, |m| m.is_dir())
-        {
-            crate::utils::log_debug(&format!("files_are_same: At least one path is actually a directory - {} (is_dir: {}) vs {} (is_dir: {})",
-                                   left.display(),
-                                   left_real_meta.as_ref().map_or(false, |m| m.is_dir()),
-                                   right.display(),
-                                   right_real_meta.as_ref().map_or(false, |m| m.is_dir())));
-            return Ok(false);
-        }
-
-        if !left.exists() || !right.exists() {
-            crate::utils::log_debug(&format!(
-                "files_are_same: One file doesn't exist - {} (exists: {}) vs {} (exists: {})",
-                left.display(),
-                left.exists(),
-                right.display(),
-                right.exists()
-            ));
+        // If either is a directory, skip content comparison
+        if left_meta.is_dir() || right_meta.is_dir() {
             return Ok(false);
         }
 
@@ -950,14 +679,14 @@ impl DirectoryComparison {
             return Self::compare_file_crc32(left, right);
         }
 
-        // Stage 6: Large files (≥1MB) - compare first 4KB only (quick check)
+        // Stage 6: Large files (≥1MB) - full CRC32 comparison
         crate::utils::log_debug(&format!(
-            "files_are_same: Using head comparison for large files ({} bytes) - {} vs {}",
+            "files_are_same: Using CRC32 for large files ({} bytes) - {} vs {}",
             left_meta.len(),
             left.display(),
             right.display()
         ));
-        Self::compare_file_heads(left, right, 4096)
+        Self::compare_file_crc32(left, right)
     }
 
     fn compare_file_crc32(left: &Path, right: &Path) -> Result<bool> {
@@ -1122,146 +851,6 @@ impl DirectoryComparison {
         Ok(crc)
     }
 
-
-    fn compare_file_heads(left: &Path, right: &Path, bytes_to_read: usize) -> Result<bool> {
-        crate::utils::log_debug(&format!(
-            "Starting file head comparison: {} vs {} ({} bytes)",
-            left.display(),
-            right.display(),
-            bytes_to_read
-        ));
-
-        // Check if either path is a directory
-        let left_metadata = match fs::metadata(left) {
-            Ok(meta) => {
-                crate::utils::log_debug(&format!(
-                    "Left metadata: {} (is_dir: {}, is_file: {})",
-                    left.display(),
-                    meta.is_dir(),
-                    meta.is_file()
-                ));
-                meta
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    return Ok(false);
-                }
-                crate::utils::log_error(&format!(
-                    "Failed to get left metadata for: {} - {}",
-                    left.display(),
-                    e
-                ));
-                return Err(e.into());
-            }
-        };
-
-        let right_metadata = match fs::metadata(right) {
-            Ok(meta) => {
-                crate::utils::log_debug(&format!(
-                    "Right metadata: {} (is_dir: {}, is_file: {})",
-                    right.display(),
-                    meta.is_dir(),
-                    meta.is_file()
-                ));
-                meta
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    return Ok(false);
-                }
-                crate::utils::log_error(&format!(
-                    "Failed to get right metadata for: {} - {}",
-                    right.display(),
-                    e
-                ));
-                return Err(e.into());
-            }
-        };
-
-        if left_metadata.is_dir() || right_metadata.is_dir() {
-            // If either is a directory, they can't have the same content
-            crate::utils::log_debug(&format!(
-                "Skipping directory comparison: {} (is_dir: {}) vs {} (is_dir: {})",
-                left.display(),
-                left_metadata.is_dir(),
-                right.display(),
-                right_metadata.is_dir()
-            ));
-            return Ok(false);
-        }
-
-        crate::utils::log_debug(&format!(
-            "Opening left file for head comparison: {}",
-            left.display()
-        ));
-        let mut left_file = match fs::File::open(left) {
-            Ok(f) => {
-                crate::utils::log_debug(&format!(
-                    "Left file opened successfully: {}",
-                    left.display()
-                ));
-                f
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    return Ok(false);
-                }
-                crate::utils::log_error(&format!(
-                    "CRITICAL: Failed to open left file: {} - {}",
-                    left.display(),
-                    e
-                ));
-                crate::utils::log_error(&format!(
-                    "Left file type check - is_file: {}, is_dir: {}",
-                    left_metadata.is_file(),
-                    left_metadata.is_dir()
-                ));
-                return Err(e.into());
-            }
-        };
-
-        crate::utils::log_debug(&format!(
-            "Opening right file for head comparison: {}",
-            right.display()
-        ));
-        let mut right_file = match fs::File::open(right) {
-            Ok(f) => {
-                crate::utils::log_debug(&format!(
-                    "Right file opened successfully: {}",
-                    right.display()
-                ));
-                f
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    return Ok(false);
-                }
-                crate::utils::log_error(&format!(
-                    "CRITICAL: Failed to open right file: {} - {}",
-                    right.display(),
-                    e
-                ));
-                crate::utils::log_error(&format!(
-                    "Right file type check - is_file: {}, is_dir: {}",
-                    right_metadata.is_file(),
-                    right_metadata.is_dir()
-                ));
-                return Err(e.into());
-            }
-        };
-
-        let mut left_buffer = vec![0; bytes_to_read];
-        let mut right_buffer = vec![0; bytes_to_read];
-
-        let left_bytes = left_file.read(&mut left_buffer)?;
-        let right_bytes = right_file.read(&mut right_buffer)?;
-
-        if left_bytes != right_bytes {
-            return Ok(false);
-        }
-
-        Ok(left_buffer[..left_bytes] == right_buffer[..right_bytes])
-    }
 
     fn insert_into_tree(
         root: &mut FileNode,
