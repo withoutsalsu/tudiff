@@ -437,7 +437,7 @@ impl DirectoryComparison {
             }
 
             processed += 1;
-            if processed % 10 == 0 || processed == total_paths {
+            if processed % 100 == 0 || processed == total_paths {
                 progress_callback(&format!("Progress: {}/{}", processed, total_paths));
             }
         }
@@ -480,8 +480,9 @@ impl DirectoryComparison {
                 (true, false) => std::cmp::Ordering::Less, // folder < file
                 (false, true) => std::cmp::Ordering::Greater, // file > folder
                 _ => {
-                    // Same type (both folders or both files) - case insensitive alphabetical
-                    a_name.to_lowercase().cmp(&b_name.to_lowercase())
+                    // Case-insensitive Unicode sort, zero String allocation
+                    a_name.chars().flat_map(|c| c.to_lowercase())
+                        .cmp(b_name.chars().flat_map(|c| c.to_lowercase()))
                 }
             }
         });
@@ -818,7 +819,7 @@ impl DirectoryComparison {
         };
 
         let mut hasher = Crc32Hasher::new();
-        let mut buffer = [0; 8192];
+        let mut buffer = [0u8; 65536];
         let mut total_bytes = 0;
 
         loop {

@@ -252,6 +252,24 @@ fn draw_right_panel(f: &mut Frame, app: &mut App, area: Rect, panel_width: usize
     );
 }
 
+fn dir_status_color(status: &FileStatus) -> Color {
+    match status {
+        FileStatus::Same => Color::White,
+        FileStatus::Different => Color::Red,
+        FileStatus::LeftOnly => Color::Blue,
+        FileStatus::RightOnly => Color::Blue,
+    }
+}
+
+fn file_status_color(status: &FileStatus) -> Color {
+    match status {
+        FileStatus::Same => Color::Gray,
+        FileStatus::Different => Color::LightRed,
+        FileStatus::LeftOnly => Color::LightBlue,
+        FileStatus::RightOnly => Color::LightBlue,
+    }
+}
+
 fn create_list_items(items: &[FileItem], panel_width: usize) -> Vec<ListItem<'_>> {
     items
         .iter()
@@ -272,12 +290,7 @@ fn create_list_items(items: &[FileItem], panel_width: usize) -> Vec<ListItem<'_>
                     let icon = parts[0];
                     let folder_name = parts[1];
 
-                    let text_color = match status {
-                        FileStatus::Same => Color::White,
-                        FileStatus::Different => Color::Red,
-                        FileStatus::LeftOnly => Color::Blue,
-                        FileStatus::RightOnly => Color::Blue,
-                    };
+                    let text_color = dir_status_color(status);
 
                     let line = Line::from(vec![
                         Span::raw(indent),
@@ -289,12 +302,7 @@ fn create_list_items(items: &[FileItem], panel_width: usize) -> Vec<ListItem<'_>
                 }
             }
 
-            let color = match status {
-                FileStatus::Same => Color::Gray,
-                FileStatus::Different => Color::LightRed,
-                FileStatus::LeftOnly => Color::LightBlue,
-                FileStatus::RightOnly => Color::LightBlue,
-            };
+            let color = file_status_color(status);
 
             if !is_dir && !display_name.trim().is_empty() {
                 let size_str = format_file_size(size);
@@ -694,4 +702,68 @@ pub fn panel_centered_rect(percent_x: u16, percent_y: u16, r: Rect, left_panel: 
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compare::FileStatus;
+
+    #[test]
+    fn file_same_is_gray() {
+        assert_eq!(file_status_color(&FileStatus::Same), Color::Gray);
+    }
+
+    #[test]
+    fn file_different_is_light_red() {
+        assert_eq!(file_status_color(&FileStatus::Different), Color::LightRed);
+    }
+
+    #[test]
+    fn file_leftonly_is_light_blue() {
+        assert_eq!(file_status_color(&FileStatus::LeftOnly), Color::LightBlue);
+    }
+
+    #[test]
+    fn file_rightonly_is_light_blue() {
+        assert_eq!(file_status_color(&FileStatus::RightOnly), Color::LightBlue);
+    }
+
+    #[test]
+    fn dir_same_is_white() {
+        assert_eq!(dir_status_color(&FileStatus::Same), Color::White);
+    }
+
+    #[test]
+    fn dir_different_is_red() {
+        assert_eq!(dir_status_color(&FileStatus::Different), Color::Red);
+    }
+
+    #[test]
+    fn dir_leftonly_is_blue() {
+        assert_eq!(dir_status_color(&FileStatus::LeftOnly), Color::Blue);
+    }
+
+    #[test]
+    fn dir_rightonly_is_blue() {
+        assert_eq!(dir_status_color(&FileStatus::RightOnly), Color::Blue);
+    }
+
+    #[test]
+    fn empty_name_placeholder_produces_one_list_item() {
+        use crate::app::FileItem;
+        use std::path::PathBuf;
+
+        let item = FileItem {
+            display_name: String::new(),
+            status: FileStatus::LeftOnly,
+            path: PathBuf::from("placeholder"),
+            is_dir: false,
+            size: None,
+            modified: None,
+        };
+        let items = [item];
+        let list_items = create_list_items(&items, 80);
+        assert_eq!(list_items.len(), 1);
+    }
 }

@@ -4,7 +4,8 @@ use ratatui::{
     layout::Rect,
     widgets::{ListState, ScrollbarState},
 };
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::SystemTime;
@@ -21,7 +22,7 @@ pub struct FileItem {
     pub modified: Option<SystemTime>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum AppMode {
     DirectoryView,
     #[allow(dead_code)]
@@ -30,7 +31,7 @@ pub enum AppMode {
     DeleteConfirm,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FilterMode {
     All,
     Different,
@@ -85,7 +86,7 @@ pub struct App {
     saved_left_selection: Option<usize>,
     saved_right_selection: Option<usize>,
     saved_active_panel: usize,
-    saved_expansion_state: Option<(FileNode, FileNode)>,
+    saved_expansion_state: Option<(HashMap<PathBuf, bool>, HashMap<PathBuf, bool>)>,
     saved_filter_mode: Option<FilterMode>,
 }
 
@@ -687,7 +688,14 @@ impl App {
             };
 
             let (file_count, folder_count, total_bytes) = if item.is_dir {
-                self.calculate_dir_stats(&source_path)
+                let source_tree = if from_left_to_right {
+                    &self.comparison.left_tree
+                } else {
+                    &self.comparison.right_tree
+                };
+                Self::find_node_ref(source_tree, &item.path)
+                    .map(Self::calculate_stats_from_node)
+                    .unwrap_or((0, 1, 0))
             } else {
                 (1, 0, item.size.unwrap_or(0))
             };
@@ -705,30 +713,34 @@ impl App {
         }
     }
 
-    fn calculate_dir_stats(&self, dir_path: &std::path::Path) -> (usize, usize, u64) {
-        use std::fs;
-
-        let mut file_count = 0;
-        let mut folder_count = 1;
-        let mut total_bytes = 0;
-
-        if let Ok(entries) = fs::read_dir(dir_path) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let (sub_files, sub_folders, sub_bytes) = self.calculate_dir_stats(&path);
-                    file_count += sub_files;
-                    folder_count += sub_folders;
-                    total_bytes += sub_bytes;
-                } else {
-                    file_count += 1;
-                    if let Ok(metadata) = entry.metadata() {
-                        total_bytes += metadata.len();
-                    }
-                }
+    fn find_node_ref<'a>(node: &'a FileNode, target: &Path) -> Option<&'a FileNode> {
+        if node.path == target {
+            return Some(node);
+        }
+        for child in &node.children {
+            if let Some(found) = Self::find_node_ref(child, target) {
+                return Some(found);
             }
         }
+        None
+    }
 
+    fn calculate_stats_from_node(node: &FileNode) -> (usize, usize, u64) {
+        let mut file_count = 0usize;
+        let mut folder_count = 1usize; // count the directory itself
+        let mut total_bytes = 0u64;
+        for child in &node.children {
+            if child.is_dir {
+                // recursive call already counts the child dir itself (folder_count starts at 1)
+                let (f, d, b) = Self::calculate_stats_from_node(child);
+                file_count += f;
+                folder_count += d;
+                total_bytes += b;
+            } else {
+                file_count += 1;
+                total_bytes += child.size.unwrap_or(0);
+            }
+        }
         (file_count, folder_count, total_bytes)
     }
 
@@ -747,9 +759,6 @@ impl App {
                 fs::copy(&copy_info.source_path, &copy_info.target_path)?;
                 self.preserve_file_attributes(&copy_info.source_path, &copy_info.target_path)?;
             }
-
-            // Wait for filesystem sync
-            std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Partial update instead of full refresh
             self.partial_update_after_copy(&copy_info)?;
@@ -945,6 +954,33 @@ impl App {
             self.restore_saved_state_safe();
         }
 
+        // After copying a directory, expand it on both sides so children are visible.
+        // restore_saved_state_safe restores the target folder's expanded=false (it was a
+        // placeholder before the copy and was never expanded), hiding all copied children.
+        if copy_info.source_path.is_dir() {
+            {
+                let target_tree = if from_left_to_right {
+                    &mut self.comparison.right_tree
+                } else {
+                    &mut self.comparison.left_tree
+                };
+                if let Some(node) = Self::find_node_in_tree_by_path(target_tree, &target_relative) {
+                    node.expanded = true;
+                }
+            }
+            {
+                let source_tree = if from_left_to_right {
+                    &mut self.comparison.left_tree
+                } else {
+                    &mut self.comparison.right_tree
+                };
+                if let Some(node) = Self::find_node_in_tree_by_path(source_tree, &source_relative) {
+                    node.expanded = true;
+                }
+            }
+            self.update_file_lists();
+        }
+
         Ok(())
     }
 
@@ -1057,8 +1093,8 @@ impl App {
             current_path = parent;
         }
 
-        // Update parent statuses in reverse order
-        parent_paths.reverse();
+        // Update parent statuses from leaf upward (innermost parent first)
+        // parent_paths is already in [leaf_parent, ..., root] order — do NOT reverse
         for parent_path in parent_paths {
             if let Some(parent_node) = Self::find_node_in_tree_by_path(tree, &parent_path) {
                 // Check children statuses to determine parent status
@@ -1117,7 +1153,14 @@ impl App {
             };
 
             let (file_count, folder_count, total_bytes) = if item.is_dir {
-                self.calculate_dir_stats(&full_path)
+                let tree = if is_left {
+                    &self.comparison.left_tree
+                } else {
+                    &self.comparison.right_tree
+                };
+                Self::find_node_ref(tree, &item.path)
+                    .map(Self::calculate_stats_from_node)
+                    .unwrap_or((0, 1, 0))
             } else {
                 (1, 0, item.size.unwrap_or(0))
             };
@@ -1146,29 +1189,8 @@ impl App {
                 fs::remove_file(&delete_info.path)?;
             }
 
-            // Wait for filesystem sync
-            std::thread::sleep(std::time::Duration::from_millis(200));
-
-            // Full refresh for reliability
-            let left_dir = self.comparison.left_dir.clone();
-            let right_dir = self.comparison.right_dir.clone();
-
-            match DirectoryComparison::new_silent(left_dir, right_dir) {
-                Ok(new_comparison) => {
-                    self.comparison = new_comparison;
-                    self.comparison.left_tree.expanded = true;
-                    self.comparison.right_tree.expanded = true;
-                    self.update_file_lists();
-
-                    // Restore saved state
-                    if self.saved_expansion_state.is_some() {
-                        self.restore_saved_state_safe();
-                    }
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            }
+            // Rescan in background — check_refresh_progress restores saved state on completion
+            self.start_refresh();
         }
 
         self.delete_info = None;
@@ -1185,13 +1207,26 @@ impl App {
         self.saved_left_selection = self.left_list_state.selected();
         self.saved_right_selection = self.right_list_state.selected();
         self.saved_active_panel = self.active_panel;
-
         self.saved_filter_mode = Some(self.filter_mode);
-
         self.saved_expansion_state = Some((
-            self.comparison.left_tree.clone(),
-            self.comparison.right_tree.clone(),
+            Self::collect_expansion_map(&self.comparison.left_tree),
+            Self::collect_expansion_map(&self.comparison.right_tree),
         ));
+    }
+
+    fn collect_expansion_map(node: &FileNode) -> HashMap<PathBuf, bool> {
+        let mut map = HashMap::new();
+        Self::collect_expansion_recursive(node, &mut map);
+        map
+    }
+
+    fn collect_expansion_recursive(node: &FileNode, map: &mut HashMap<PathBuf, bool>) {
+        if node.is_dir {
+            map.insert(node.path.clone(), node.expanded);
+            for child in &node.children {
+                Self::collect_expansion_recursive(child, map);
+            }
+        }
     }
 
     fn restore_saved_state_safe(&mut self) {
@@ -1201,9 +1236,9 @@ impl App {
 
         self.active_panel = self.saved_active_panel;
 
-        if let Some((saved_left_tree, saved_right_tree)) = self.saved_expansion_state.take() {
-            Self::restore_expansion_state_safe(&mut self.comparison.left_tree, &saved_left_tree);
-            Self::restore_expansion_state_safe(&mut self.comparison.right_tree, &saved_right_tree);
+        if let Some((left_map, right_map)) = self.saved_expansion_state.take() {
+            Self::restore_expansion_from_map(&mut self.comparison.left_tree, &left_map);
+            Self::restore_expansion_from_map(&mut self.comparison.right_tree, &right_map);
         }
 
         self.comparison.left_tree.expanded = true;
@@ -1233,16 +1268,13 @@ impl App {
         self.saved_filter_mode = None;
     }
 
-    fn restore_expansion_state_safe(current_tree: &mut FileNode, saved_tree: &FileNode) {
-        if current_tree.is_dir && saved_tree.is_dir && current_tree.path == saved_tree.path {
-            current_tree.expanded = saved_tree.expanded;
-        }
-
-        for current_child in &mut current_tree.children {
-            if let Some(saved_child) = saved_tree.children.iter().find(|child| {
-                child.path == current_child.path && child.is_dir == current_child.is_dir
-            }) {
-                Self::restore_expansion_state_safe(current_child, saved_child);
+    fn restore_expansion_from_map(node: &mut FileNode, map: &HashMap<PathBuf, bool>) {
+        if node.is_dir {
+            if let Some(&expanded) = map.get(&node.path) {
+                node.expanded = expanded;
+            }
+            for child in &mut node.children {
+                Self::restore_expansion_from_map(child, map);
             }
         }
     }
