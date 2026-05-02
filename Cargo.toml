@@ -1,6 +1,6 @@
 [package]
 name = "tudiff"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["withoutsalsu <rsforpi@gmail.com>"]
 license = "MIT"
