@@ -1,6 +1,6 @@
 [package]
 name = "tudiff"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["withoutsalsu <rsforpi@gmail.com>"]
 license = "MIT"
@@ -12,6 +12,7 @@ keywords = ["tui", "diff", "directory", "comparison", "file"]
 categories = ["command-line-utilities", "filesystem"]
 exclude = [
     ".git*",
+    ".omc/",
     "target/",
     "*.tmp",
     "*.sh",
