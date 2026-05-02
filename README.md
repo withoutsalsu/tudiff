@@ -167,11 +167,11 @@ Fast and accurate comparison using step-by-step processing:
 
 1. **Stage 1: File size comparison** (fastest) - Different sizes mean different files
 2. **Stage 2: Empty file handling** - 0-byte files are considered identical
-3. **Stage 3: Small files** (< 4KB) - Full content comparison
-4. **Stage 4: Medium files** (< 1MB) - Fast CRC32 hash comparison
-5. **Stage 5: Large files** (≥ 1MB) - Compare first 4KB only for quick processing
+3. **Stage 3: Small files** (< 4KB) - Full byte-for-byte content comparison
+4. **Stage 4: Medium files** (4KB – 1MB) - Fast CRC32 hash comparison
+5. **Stage 5: Large files** (≥ 1MB) - Full CRC32 hash comparison with 64KB read buffer
 
-**Note**: This approach provides both speed and accuracy even for large directories.
+**Note**: All files are fully compared for correctness. The tiered approach maximizes speed by using the fastest method appropriate for each file size.
 
 ## UI Enhancements
 
