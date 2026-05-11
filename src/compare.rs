@@ -30,6 +30,7 @@ pub struct FileNode {
     pub expanded: bool,
     pub size: Option<u64>,
     pub modified: Option<SystemTime>,
+    pub is_symlink: bool,
 }
 
 impl FileNode {
@@ -43,6 +44,7 @@ impl FileNode {
             expanded: false, // All directories start collapsed by default
             size: None,
             modified: None,
+            is_symlink: false,
         }
     }
 
@@ -70,6 +72,7 @@ impl FileNode {
             expanded: false,
             size,
             modified,
+            is_symlink: false,
         }
     }
 
@@ -189,7 +192,7 @@ impl DirectoryComparison {
     fn collect_files_impl<F: FnMut(&str)>(
         dir: &Path,
         progress: &mut F,
-    ) -> Result<HashMap<PathBuf, fs::Metadata>> {
+    ) -> Result<HashMap<PathBuf, (fs::Metadata, bool)>> {
         let mut files = HashMap::new();
         let mut count = 0;
 
@@ -207,12 +210,13 @@ impl DirectoryComparison {
                 }
             };
             let relative_path = entry.path().strip_prefix(dir)?.to_path_buf();
+            let is_symlink = entry.path_is_symlink();
             let metadata = match entry.metadata() {
                 Ok(m) => m,
                 Err(e) if e.io_error().is_some_and(|io| matches!(io.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound)) => continue,
                 Err(e) => return Err(e.into()),
             };
-            files.insert(relative_path, metadata);
+            files.insert(relative_path, (metadata, is_symlink));
 
             count += 1;
             if count % 50 == 0 {
@@ -223,14 +227,14 @@ impl DirectoryComparison {
         Ok(files)
     }
 
-    fn collect_files(dir: &Path) -> Result<HashMap<PathBuf, fs::Metadata>> {
+    fn collect_files(dir: &Path) -> Result<HashMap<PathBuf, (fs::Metadata, bool)>> {
         Self::collect_files_impl(dir, &mut |_| {})
     }
 
     fn collect_files_with_progress<F>(
         dir: &Path,
         progress_callback: &mut F,
-    ) -> Result<HashMap<PathBuf, fs::Metadata>>
+    ) -> Result<HashMap<PathBuf, (fs::Metadata, bool)>>
     where
         F: FnMut(&str),
     {
@@ -240,8 +244,8 @@ impl DirectoryComparison {
     fn compare_trees_with_progress<F>(
         left_dir: &Path,
         right_dir: &Path,
-        left_files: &HashMap<PathBuf, fs::Metadata>,
-        right_files: &HashMap<PathBuf, fs::Metadata>,
+        left_files: &HashMap<PathBuf, (fs::Metadata, bool)>,
+        right_files: &HashMap<PathBuf, (fs::Metadata, bool)>,
         progress_callback: &mut F,
     ) -> Result<(FileNode, FileNode)>
     where
@@ -288,8 +292,12 @@ impl DirectoryComparison {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let left_meta = left_files.get(&path);
-            let right_meta = right_files.get(&path);
+            let left_entry = left_files.get(&path);
+            let right_entry = right_files.get(&path);
+            let left_meta = left_entry.map(|(m, _)| m);
+            let right_meta = right_entry.map(|(m, _)| m);
+            let left_is_symlink = left_entry.map(|(_, s)| *s).unwrap_or(false);
+            let right_is_symlink = right_entry.map(|(_, s)| *s).unwrap_or(false);
             let is_dir = left_meta
                 .map(|m| m.is_dir())
                 .or_else(|| right_meta.map(|m| m.is_dir()))
@@ -386,6 +394,7 @@ impl DirectoryComparison {
                         status,
                         false,
                         left_meta,
+                        left_is_symlink,
                     )?;
                     Self::insert_into_tree(
                         &mut right_root,
@@ -395,6 +404,7 @@ impl DirectoryComparison {
                         status,
                         true,
                         None,
+                        false,
                     )?;
                 }
                 FileStatus::RightOnly => {
@@ -406,6 +416,7 @@ impl DirectoryComparison {
                         status,
                         true,
                         None,
+                        false,
                     )?;
                     Self::insert_into_tree(
                         &mut right_root,
@@ -415,6 +426,7 @@ impl DirectoryComparison {
                         status,
                         false,
                         right_meta,
+                        right_is_symlink,
                     )?;
                 }
                 _ => {
@@ -426,6 +438,7 @@ impl DirectoryComparison {
                         status,
                         false,
                         left_meta,
+                        left_is_symlink,
                     )?;
                     Self::insert_into_tree(
                         &mut right_root,
@@ -435,6 +448,7 @@ impl DirectoryComparison {
                         status,
                         false,
                         right_meta,
+                        right_is_symlink,
                     )?;
                 }
             }
@@ -856,6 +870,7 @@ impl DirectoryComparison {
         status: FileStatus,
         _exists: bool,
         metadata: Option<&fs::Metadata>,
+        is_symlink: bool,
     ) -> Result<()> {
         let components: Vec<_> = path.components().collect();
         let mut current = root;
@@ -896,13 +911,15 @@ impl DirectoryComparison {
                 };
 
                 let new_child = if is_last {
-                    FileNode::new_with_metadata(
+                    let mut node = FileNode::new_with_metadata(
                         actual_name,
                         child_path,
                         child_is_dir,
                         child_status,
                         metadata,
-                    )
+                    );
+                    node.is_symlink = is_symlink;
+                    node
                 } else {
                     FileNode::new(actual_name, child_path, child_is_dir, child_status)
                 };

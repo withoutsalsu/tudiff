@@ -295,7 +295,13 @@ pub fn simple_compare(dir1: std::path::PathBuf, dir2: std::path::PathBuf) -> Res
         if node.name.is_empty() {
             println!("{}", indent);
         } else {
-            let icon = if node.is_dir { "📁" } else { "📄" };
+            let icon = if node.is_symlink {
+                "🔗"
+            } else if node.is_dir {
+                "📁"
+            } else {
+                "📄"
+            };
             let status_char = match node.status {
                 FileStatus::Same => "=",
                 FileStatus::Different => "≠",

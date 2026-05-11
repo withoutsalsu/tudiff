@@ -761,6 +761,7 @@ mod tests {
             is_dir: false,
             size: None,
             modified: None,
+            is_symlink: false,
         };
         let items = [item];
         let list_items = create_list_items(&items, 80);

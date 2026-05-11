@@ -20,6 +20,7 @@ pub struct FileItem {
     pub is_dir: bool,
     pub size: Option<u64>,
     pub modified: Option<SystemTime>,
+    pub is_symlink: bool,
 }
 
 #[derive(PartialEq, Debug)]
@@ -158,6 +159,8 @@ impl App {
 
         let icon = if node.name.is_empty() {
             ""
+        } else if node.is_symlink {
+            "🔗"
         } else if node.is_dir {
             if node.expanded {
                 "📂"
@@ -197,6 +200,7 @@ impl App {
                 is_dir: node.is_dir,
                 size: node.size,
                 modified: node.modified,
+                is_symlink: node.is_symlink,
             });
         }
 
