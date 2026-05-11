@@ -197,8 +197,11 @@ impl DirectoryComparison {
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
-                    if e.io_error().is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied) {
-                        continue;
+                    if let Some(io) = e.io_error() {
+                        match io.kind() {
+                            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound => continue,
+                            _ => {}
+                        }
                     }
                     return Err(e.into());
                 }
@@ -206,7 +209,7 @@ impl DirectoryComparison {
             let relative_path = entry.path().strip_prefix(dir)?.to_path_buf();
             let metadata = match entry.metadata() {
                 Ok(m) => m,
-                Err(e) if e.io_error().is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied) => continue,
+                Err(e) if e.io_error().is_some_and(|io| matches!(io.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound)) => continue,
                 Err(e) => return Err(e.into()),
             };
             files.insert(relative_path, metadata);
@@ -619,11 +622,7 @@ impl DirectoryComparison {
                     content
                 }
                 Err(e) => {
-                    if e.kind() == std::io::ErrorKind::PermissionDenied {
-                        crate::utils::log_error(&format!(
-                            "Permission denied reading left small file, treating as different: {}",
-                            left.display()
-                        ));
+                    if matches!(e.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound | std::io::ErrorKind::IsADirectory) {
                         return Ok(false);
                     }
                     crate::utils::log_error(&format!(
@@ -644,11 +643,7 @@ impl DirectoryComparison {
                     content
                 }
                 Err(e) => {
-                    if e.kind() == std::io::ErrorKind::PermissionDenied {
-                        crate::utils::log_error(&format!(
-                            "Permission denied reading right small file, treating as different: {}",
-                            right.display()
-                        ));
+                    if matches!(e.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound | std::io::ErrorKind::IsADirectory) {
                         return Ok(false);
                     }
                     crate::utils::log_error(&format!(
@@ -708,7 +703,7 @@ impl DirectoryComparison {
             }
             Err(e) => {
                 if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
-                    if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                    if matches!(io_err.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound) {
                         return Ok(false);
                     }
                 }
@@ -732,7 +727,7 @@ impl DirectoryComparison {
             }
             Err(e) => {
                 if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
-                    if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                    if matches!(io_err.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound) {
                         return Ok(false);
                     }
                 }
