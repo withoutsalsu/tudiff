@@ -387,9 +387,9 @@ fn draw_progress_popup(f: &mut Frame, app: &App) {
 fn draw_copy_confirm_popup(f: &mut Frame, app: &App) {
     if let Some(copy_info) = &app.copy_info {
         let popup_area = if copy_info.from_left_to_right {
-            panel_centered_rect(50, 25, f.area(), true)
+            panel_centered_rect_rows(50, 14, f.area(), true)
         } else {
-            panel_centered_rect(50, 25, f.area(), false)
+            panel_centered_rect_rows(50, 14, f.area(), false)
         };
 
         f.render_widget(Clear, popup_area);
@@ -516,7 +516,7 @@ fn draw_copy_buttons(f: &mut Frame, area: Rect) {
 
 fn draw_delete_confirm_popup(f: &mut Frame, app: &App) {
     if let Some(delete_info) = &app.delete_info {
-        let popup_area = panel_centered_rect(50, 25, f.area(), delete_info.is_left);
+        let popup_area = panel_centered_rect_rows(50, 14, f.area(), delete_info.is_left);
 
         f.render_widget(Clear, popup_area);
 
@@ -691,6 +691,47 @@ pub fn panel_centered_rect(percent_x: u16, percent_y: u16, r: Rect, left_panel: 
             Constraint::Percentage((100 - percent_y) / 2),
             Constraint::Percentage(percent_y),
             Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(target_panel);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+pub fn panel_centered_rect_rows(percent_x: u16, height_rows: u16, r: Rect, left_panel: bool) -> Rect {
+    let content_area = Rect {
+        x: r.x,
+        y: r.y + 3,
+        width: r.width,
+        height: r.height.saturating_sub(3),
+    };
+
+    let panel_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(content_area);
+
+    let target_panel = if left_panel {
+        panel_chunks[0]
+    } else {
+        panel_chunks[1]
+    };
+
+    let clamped_height = height_rows.min(target_panel.height);
+    let vertical_padding = target_panel.height.saturating_sub(clamped_height) / 2;
+
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(vertical_padding),
+            Constraint::Length(clamped_height),
+            Constraint::Min(0),
         ])
         .split(target_panel);
 
